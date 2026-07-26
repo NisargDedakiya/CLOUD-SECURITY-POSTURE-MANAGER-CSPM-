@@ -29,12 +29,48 @@ def get_subscription(db: Session, org_id: str) -> Subscription:
     return sub
 
 
+TRIAL_DAYS = 14
+
+
+def _as_utc(dt):
+    """Treat DB-loaded naive datetimes (SQLite) as UTC for safe comparison."""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
+
 def plan_of(db: Session, org_id: str) -> Plan:
     sub = get_subscription(db, org_id)
+    # An expired trial reverts to free until they pay.
+    if sub.status == "trialing":
+        if sub.trial_ends_at and _as_utc(sub.trial_ends_at) < datetime.now(UTC):
+            sub.status = "canceled"
+            sub.plan = "free"
+            db.commit()
+            return get_plan("free")
+        return get_plan(sub.plan)
     # A past_due/canceled subscription falls back to the free tier's limits.
-    if sub.status not in ("active", "trialing"):
+    if sub.status != "active":
         return get_plan("free")
     return get_plan(sub.plan)
+
+
+def start_trial(db: Session, org_id: str, plan: str = "pro") -> Subscription:
+    """Start a one-time 14-day trial of a paid plan for the org."""
+    from datetime import timedelta
+
+    sub = get_subscription(db, org_id)
+    if sub.trial_used:
+        raise EntitlementError("Your trial has already been used.", upgrade_to=plan)
+    if sub.status == "active" and sub.plan != "free":
+        raise EntitlementError("You're already on a paid plan.", upgrade_to=plan)
+    sub.plan = plan
+    sub.status = "trialing"
+    sub.trial_used = True
+    sub.trial_ends_at = datetime.now(UTC) + timedelta(days=TRIAL_DAYS)
+    db.commit()
+    db.refresh(sub)
+    return sub
 
 
 def has_feature(db: Session, org_id: str, feature: Feature) -> bool:

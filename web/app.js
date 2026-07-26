@@ -342,7 +342,17 @@ views.billing = async (mount) => {
     sso_scim: "SSO / SCIM", prowler: "Prowler checks", auto_remediation: "Auto-remediation",
     priority_support: "Priority support",
   };
-  mount.innerHTML = `
+  const trialEligible = sub.plan === "free" && !sub.trial_used;
+  const trialBanner = sub.status === "trialing"
+    ? `<div class="card" style="border-color:var(--accent);margin-bottom:1rem">
+         <b>🎁 Pro trial active</b> — ${sub.trial_days_left ?? 0} day(s) left.
+         <a class="btn primary sm" style="margin-left:.6rem" href="#" id="trial-convert">Keep Pro</a></div>`
+    : trialEligible
+    ? `<div class="card" style="border-color:var(--accent);margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between">
+         <div><b>Try Pro free for 14 days</b> — all frameworks, multi-cloud, drift &amp; integrations. No card required.</div>
+         <button class="btn primary" id="trial-start">Start free trial</button></div>`
+    : "";
+  mount.innerHTML = trialBanner + `
     <div class="grid cols-3">
       <div class="card"><h3>Current plan</h3><div class="kpi"><div class="value">${esc((data.current_plan||"free").toUpperCase())}</div>
         <div class="label">status: ${esc(sub.status)}</div></div></div>
@@ -360,6 +370,21 @@ views.billing = async (mount) => {
         <tr><td>Cloud accounts</td>${data.plans.map((p) => `<td>${p.limits.max_accounts === -1 ? "∞" : p.limits.max_accounts}</td>`).join("")}</tr>
         <tr><td>Scans / month</td>${data.plans.map((p) => `<td>${p.limits.max_scans_per_month === -1 ? "∞" : p.limits.max_scans_per_month}</td>`).join("")}</tr>
       </tbody></table></div>`;
+
+  const trialBtn = $("#trial-start", mount);
+  if (trialBtn) trialBtn.onclick = async () => {
+    trialBtn.disabled = true; trialBtn.textContent = "Starting…";
+    try { await api("/billing/trial", { method: "POST", body: JSON.stringify({ plan: "pro" }) });
+      toast("14-day Pro trial started 🎉", "success"); views.billing(mount);
+    } catch (e) { toast(e.message, "error"); trialBtn.disabled = false; trialBtn.textContent = "Start free trial"; }
+  };
+  const conv = $("#trial-convert", mount);
+  if (conv) conv.onclick = async (e) => {
+    e.preventDefault();
+    try { await api("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro" }) });
+      toast("You're on Pro 🎉", "success"); views.billing(mount);
+    } catch (err) { toast(err.message, "error"); }
+  };
 
   $$("[data-plan]", mount).forEach((b) => b.onclick = async () => {
     const plan = b.dataset.plan;

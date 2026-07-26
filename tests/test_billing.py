@@ -164,6 +164,41 @@ def test_upgrade_then_second_account_allowed(free_client):
     assert r.status_code == 201
 
 
+def test_trial_unlocks_pro_then_expires(db, free_org):
+    from datetime import datetime, timedelta
+
+    from cspm.billing.entitlements import get_subscription, plan_of, start_trial
+
+    start_trial(db, free_org.id)
+    assert plan_of(db, free_org.id).id == "pro"  # trial active → Pro features
+
+    # Force expiry → reverts to free on next resolution.
+    sub = get_subscription(db, free_org.id)
+    sub.trial_ends_at = datetime.now(UTC) - timedelta(days=1)
+    db.commit()
+    assert plan_of(db, free_org.id).id == "free"
+
+
+def test_trial_is_one_time(db, free_org):
+    from cspm.billing.entitlements import EntitlementError, start_trial
+
+    start_trial(db, free_org.id)
+    with pytest.raises(EntitlementError):
+        start_trial(db, free_org.id)
+
+
+def test_trial_endpoint_flow(free_client):
+    r = free_client.post("/api/v1/cspm/billing/trial", json={"plan": "pro"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "trialing"
+    sub = free_client.get("/api/v1/cspm/billing/subscription").json()
+    assert sub["plan"] == "pro" and sub["trial_days_left"] >= 13
+    # Pro features now work during the trial.
+    assert free_client.get("/api/v1/cspm/drift").status_code == 200
+    # Trial can't be started twice.
+    assert free_client.post("/api/v1/cspm/billing/trial", json={"plan": "pro"}).status_code == 402
+
+
 def test_prowler_ingest_gated_and_works(free_client):
     acct_id = free_client.post(
         "/api/v1/cspm/accounts", json={"provider": "aws", "role_arn": "arn:1"}

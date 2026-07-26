@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -36,12 +38,45 @@ def list_plans(
 def subscription(
     ctx: OrgContext = Depends(get_org_context), db: Session = Depends(get_db)
 ):
+    from datetime import datetime
+
+    # plan_of() lazily expires a lapsed trial before we read status.
+    from cspm.billing.entitlements import plan_of
+
+    plan_of(db, ctx.org_id)
     sub = get_subscription(db, ctx.org_id)
+    trial_days_left = None
+    if sub.status == "trialing" and sub.trial_ends_at:
+        ends = sub.trial_ends_at
+        if ends.tzinfo is None:
+            ends = ends.replace(tzinfo=UTC)
+        delta = ends - datetime.now(UTC)
+        trial_days_left = max(0, delta.days + (1 if delta.seconds else 0))
     return {
         "plan": sub.plan,
         "status": sub.status,
         "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+        "trial_ends_at": sub.trial_ends_at.isoformat() if sub.trial_ends_at else None,
+        "trial_days_left": trial_days_left,
+        "trial_used": sub.trial_used,
         "usage": usage_summary(db, ctx.org_id),
+    }
+
+
+@billing_router.post("/trial")
+def start_trial_endpoint(
+    payload: dict = Body(default={}),
+    ctx: OrgContext = Depends(ADMIN),
+    db: Session = Depends(get_db),
+):
+    """Start a one-time 14-day Pro trial (no card required)."""
+    from cspm.billing.entitlements import start_trial
+
+    sub = start_trial(db, ctx.org_id, payload.get("plan", "pro"))
+    return {
+        "plan": sub.plan,
+        "status": sub.status,
+        "trial_ends_at": sub.trial_ends_at.isoformat() if sub.trial_ends_at else None,
     }
 
 

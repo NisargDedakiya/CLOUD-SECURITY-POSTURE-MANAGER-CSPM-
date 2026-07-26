@@ -168,6 +168,8 @@ class Subscription(Base):
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255))
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(255))
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    trial_used: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

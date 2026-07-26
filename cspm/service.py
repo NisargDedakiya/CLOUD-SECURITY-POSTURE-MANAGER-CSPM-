@@ -189,6 +189,46 @@ def _maybe_alert(account: CloudAccount, scan: ScanRun) -> None:
         db.close()
 
 
+def ingest_findings(
+    db: Session, account: CloudAccount, findings: list[Finding], engine: str = "prowler"
+) -> ScanRun:
+    """Persist externally-produced findings (e.g. Prowler) as a scan run.
+
+    Uses the same dedup + snapshot pipeline as native scans, so ingested and
+    native findings live together and feed compliance scoring identically.
+    """
+    scan = ScanRun(cloud_account_id=account.id, status="running", started_at=_now())
+    db.add(scan)
+    db.flush()
+    persisted = 0
+    for f in findings:
+        dedup = f.dedup_hash(account.id)
+        if db.query(FindingRecord).filter_by(dedup_hash=dedup).one_or_none() is not None:
+            continue
+        db.add(
+            FindingRecord(
+                org_id=account.org_id,
+                cloud_account_id=account.id,
+                scan_run_id=scan.id,
+                check_id=f.check_id,
+                resource=f.resource,
+                severity=f.severity,
+                description=f.description,
+                remediation=f.remediation,
+                dedup_hash=dedup,
+            )
+        )
+        persisted += 1
+    scan.status = "completed"
+    scan.completed_at = _now()
+    scan.checks_run = len(findings)
+    scan.findings_count = persisted
+    db.commit()
+    _record_compliance_snapshot(db, account, scan)
+    db.refresh(scan)
+    return scan
+
+
 def run_drift_check(
     db: Session, account: CloudAccount, session=None
 ) -> list[DriftEvent]:

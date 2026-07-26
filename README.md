@@ -365,6 +365,23 @@ def check_my_rule(self) -> list[Finding]:
 
 ---
 
+## 🚦 Product readiness (honest status)
+
+What it takes to go from "strong build" to "branded product a company relies on":
+
+| Layer | Status | Where |
+|---|---|---|
+| **Working core** | ✅ built + **moto-validated** against real boto3 shapes | `tests/test_moto_integration.py` |
+| **Check breadth** | ✅ native checks **+ Prowler ingest** (hundreds) | `POST /accounts/{id}/prowler-ingest` |
+| **Brand** | ✅ name, logo, landing page, positioning | `web/landing.html`, `docs/brand/` |
+| **Trust (docs)** | ✅ SECURITY / Privacy / Terms / SOC2 & pentest checklists | `SECURITY.md`, `web/legal/`, `docs/legal/` |
+| **Trust (attestation)** | ⏳ needs a **real** third-party SOC 2 audit + pen-test | checklists provided |
+| **Business** | ✅ pricing + Stripe go-live + company checklists · ⏳ real Stripe/LLC need you | `docs/business/` |
+| **GTM** | ✅ pilot plan, one-pager, outreach templates · ⏳ real customers need you | `docs/gtm/` |
+| **Ops** | ✅ Helm/HPA, metrics, runbook, SLA template · ⏳ real deploy + on-call need you | `docs/ops/`, `deploy/helm/` |
+
+Marketing site: `web/landing.html` → served at `/static/landing.html`.
+
 ## 🗺️ Roadmap
 
 Done in recent iterations:

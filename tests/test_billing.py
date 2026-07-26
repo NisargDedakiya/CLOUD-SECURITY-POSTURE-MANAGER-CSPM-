@@ -162,3 +162,28 @@ def test_upgrade_then_second_account_allowed(free_client):
     free_client.post("/api/v1/cspm/accounts", json={"provider": "aws", "role_arn": "arn:1"})
     r = free_client.post("/api/v1/cspm/accounts", json={"provider": "aws", "role_arn": "arn:2"})
     assert r.status_code == 201
+
+
+def test_prowler_ingest_gated_and_works(free_client):
+    acct_id = free_client.post(
+        "/api/v1/cspm/accounts", json={"provider": "aws", "role_arn": "arn:1"}
+    ).json()["id"]
+    prowler_results = {
+        "results": [
+            {"status": "FAIL", "check_id": "iam_root_mfa", "severity": "critical",
+             "resource_uid": "arn:aws:iam::1:root", "check_title": "Root MFA"},
+            {"status": "FAIL", "check_id": "ec2_ebs_encryption", "severity": "high",
+             "resource_uid": "vol-1", "check_title": "EBS encryption"},
+        ]
+    }
+    # Free plan: Prowler is gated.
+    blocked = free_client.post(f"/api/v1/cspm/accounts/{acct_id}/prowler-ingest", json=prowler_results)
+    assert blocked.status_code == 402
+
+    # Upgrade to Pro → ingestion works.
+    free_client.post("/api/v1/cspm/billing/checkout", json={"plan": "pro"})
+    ok = free_client.post(f"/api/v1/cspm/accounts/{acct_id}/prowler-ingest", json=prowler_results)
+    assert ok.status_code == 202
+    assert ok.json()["findings_count"] == 2
+    ids = {f["check_id"] for f in free_client.get("/api/v1/cspm/findings").json()}
+    assert "prowler_iam_root_mfa" in ids

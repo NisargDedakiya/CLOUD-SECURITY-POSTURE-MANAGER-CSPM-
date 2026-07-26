@@ -234,6 +234,37 @@ def dev_seed(
     return {"account_id": account.id, "scan_run_id": scan.id, "findings": scan.findings_count}
 
 
+@router.post("/accounts/{account_id}/prowler-ingest", response_model=ScanRunOut, status_code=202)
+def ingest_prowler(
+    account_id: str,
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(WRITE),
+    db: Session = Depends(get_db),
+):
+    """Ingest Prowler results (OCSF/JSON) as a scan run — hundreds of checks.
+
+    Run `prowler aws -M json-ocsf` in your pipeline and POST the JSON here as
+    ``{"results": [...]}``. Gated by the Prowler feature (Pro+).
+    """
+    require_feature(db, ctx.org_id, Feature.PROWLER)
+    account = _account_or_404(db, ctx, account_id)
+    check_scan_quota(db, ctx.org_id)
+
+    from cspm.auditors.prowler import parse_prowler_json
+    from cspm.service import ingest_findings
+
+    results = payload.get("results")
+    if not isinstance(results, list):
+        raise HTTPException(status_code=400, detail="Expected {'results': [...]}.")
+    findings = parse_prowler_json(results)
+    scan = ingest_findings(db, account, findings, engine="prowler")
+    record_action(
+        db, org_id=ctx.org_id, user_id=ctx.user_id, action="cspm.prowler.ingest",
+        resource=account_id, meta={"ingested": scan.findings_count}, ip_addr=ctx.ip_addr,
+    )
+    return scan
+
+
 @router.get("/scans/{scan_run_id}", response_model=ScanRunOut)
 def scan_status(
     scan_run_id: str,

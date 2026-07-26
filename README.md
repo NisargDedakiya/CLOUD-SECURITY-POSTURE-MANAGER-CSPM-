@@ -142,6 +142,67 @@ docker compose up --build
 
 ---
 
+## 🪟 Running on Windows
+
+**Docker is NOT required.** CSPM runs natively on Windows with just Python — Docker
+is only a convenience for the full Postgres + Redis + worker stack.
+
+### Native (no Docker) — recommended for dev / demo / single-node
+
+```powershell
+# 1. Install Python 3.11+ from python.org (tick "Add to PATH")
+python --version
+
+# 2. Clone and create a virtual environment
+git clone https://github.com/nisargdedakiya/cloud-security-posture-manager-cspm-.git
+cd cloud-security-posture-manager-cspm-
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# 3. Install
+pip install -e ".[dev]"
+
+# 4. Persist data to a file (default is in-memory and resets on restart)
+$env:CSPM_DATABASE_URL = "sqlite+pysqlite:///./cspm.db"
+
+# 5. Run the web app
+uvicorn cspm.api.app:app --reload
+#    → open http://127.0.0.1:8000  (sign in demo-org/admin, "Load demo data")
+
+# …or the CLI
+cspm --demo
+```
+
+That's the **entire** product — dashboard, scans, findings, compliance, drift,
+billing — running on Windows with **no Docker, no Postgres, no Redis**.
+
+**When do you need more?**
+
+| You want… | Add | Docker helps? |
+|---|---|---|
+| Dashboard, scans, compliance, billing (SQLite) | nothing | ❌ not needed |
+| Background/scheduled scans via Celery | **Redis** | ✅ easiest via Docker |
+| Production database | **PostgreSQL** | ✅ easiest via Docker |
+| One-command prod-like stack | — | ✅ `docker compose up` |
+
+On native Windows keep `CSPM_EAGER_TASKS=true` (the default) so scans run
+in-process — then **Redis/Celery aren't required at all**. Redis has no official
+native Windows build, so if you want background workers, Docker Desktop (or WSL2)
+is the simplest path.
+
+### With Docker Desktop (prod-like)
+
+Install **Docker Desktop for Windows**, then in PowerShell:
+
+```powershell
+$env:CSPM_ENCRYPTION_KEY = (python -c "from cspm.security.crypto import generate_key; print(generate_key())")
+docker compose up --build
+```
+
+This brings up API + Celery worker + Postgres + Redis with migrations applied.
+
+---
+
 ## 🌐 API surface (`/api/v1/cspm/`)
 
 | Method | Path | Description |

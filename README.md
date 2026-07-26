@@ -186,6 +186,32 @@ is wired in.
 
 See [`.env.example`](.env.example) for every configuration knob.
 
+## 💳 Subscriptions & plans
+
+CSPM is a monetizable SaaS: features and usage are gated by subscription tier,
+billed through Stripe (or set manually for self-hosted/enterprise contracts).
+
+| | Free | Starter · $49/mo | Pro · $299/mo | Enterprise |
+|---|---|---|---|---|
+| Cloud accounts | 1 | 3 | 15 | ∞ |
+| Scans / month | 10 | 100 | 1,000 | ∞ |
+| Frameworks | CIS AWS | + SOC 2 | All | All |
+| Drift detection | — | ✅ | ✅ | ✅ |
+| Multi-cloud (GCP/Azure) | — | — | ✅ | ✅ |
+| Integrations, evidence, trends, Prowler | — | — | ✅ | ✅ |
+| API keys | — | 2 | 10 | ∞ |
+| SSO / SCIM, RLS, priority support | — | — | — | ✅ |
+
+- **Enforcement**: gated endpoints return **HTTP 402** with an `upgrade_to` hint;
+  the web app turns that into a "🔒 upgrade" prompt. Limits (accounts, scans/mo,
+  API keys) are metered per org.
+- **Billing endpoints**: `GET /billing/plans`, `GET /billing/subscription`
+  (with live usage), `POST /billing/checkout`, `POST /billing/portal`,
+  `POST /billing/webhook`.
+- **Modes**: `CSPM_BILLING_MODE=stripe` uses Stripe Checkout/Portal + webhooks;
+  `manual` (default) flips plans directly — handy for dev and negotiated deals.
+- Plans are defined in one place — `cspm/billing/plans.py`.
+
 ## 🔐 Security model
 
 - **STS AssumeRole with a per-org external id** to prevent the confused-deputy problem.

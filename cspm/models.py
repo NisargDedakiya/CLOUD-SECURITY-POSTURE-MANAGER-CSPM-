@@ -154,6 +154,24 @@ class Baseline(Base):
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class Subscription(Base):
+    """cspm_subscriptions — an org's plan + Stripe linkage."""
+
+    __tablename__ = "cspm_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organisations.id", ondelete="CASCADE"), unique=True
+    )
+    plan: Mapped[str] = mapped_column(String(50), default="free")
+    status: Mapped[str] = mapped_column(String(30), default="active")  # active/past_due/canceled
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(255))
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(255))
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class ComplianceSnapshot(Base):
     """cspm_compliance_snapshots — per-scan framework score, for trend lines."""
 

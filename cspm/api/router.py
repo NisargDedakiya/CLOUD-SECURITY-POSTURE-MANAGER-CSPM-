@@ -14,6 +14,13 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from cspm.api.pagination import limit_param, offset_param, paginate
+from cspm.billing.entitlements import (
+    check_account_limit,
+    check_scan_quota,
+    plan_of,
+    require_feature,
+)
+from cspm.billing.plans import Feature
 from cspm.compliance import compute_scores, evidence_report
 from cspm.config import get_settings
 from cspm.connectors import ConnectorError, get_connector
@@ -66,6 +73,10 @@ def connect_account(
     db: Session = Depends(get_db),
 ):
     provider = payload.get("provider")
+    # Entitlements: account cap for all, multi-cloud gated to paid plans.
+    check_account_limit(db, ctx.org_id)
+    if provider in ("gcp", "azure"):
+        require_feature(db, ctx.org_id, Feature.MULTI_CLOUD)
     try:
         if provider == "aws":
             req = AWSConnectRequest(**payload)
@@ -172,6 +183,7 @@ def trigger_scan(
     db: Session = Depends(get_db),
 ):
     account = _account_or_404(db, ctx, account_id)
+    check_scan_quota(db, ctx.org_id)
     record_action(
         db,
         org_id=ctx.org_id,
@@ -368,6 +380,10 @@ def compliance_score(
     scores = compute_scores(_failed_check_ids(db, ctx))
     if framework not in scores:
         raise HTTPException(status_code=404, detail="Unknown framework.")
+    if not plan_of(db, ctx.org_id).allows_framework(framework):
+        from cspm.billing.entitlements import EntitlementError
+
+        raise EntitlementError(f"Framework '{framework}' requires an upgrade.", "starter")
     return {"framework": framework, **scores[framework]}
 
 
@@ -377,6 +393,7 @@ def compliance_evidence(
     ctx: OrgContext = Depends(get_org_context),
     db: Session = Depends(get_db),
 ):
+    require_feature(db, ctx.org_id, Feature.EVIDENCE_EXPORT)
     findings = db.query(FindingRecord).filter_by(org_id=ctx.org_id, status="open").all()
     report = evidence_report(framework, findings)
     if not report["controls"]:
@@ -394,6 +411,7 @@ def list_drift(
     ctx: OrgContext = Depends(get_org_context),
     db: Session = Depends(get_db),
 ):
+    require_feature(db, ctx.org_id, Feature.DRIFT)
     q = db.query(DriftEvent).filter_by(org_id=ctx.org_id)
     if status:
         q = q.filter_by(status=status)

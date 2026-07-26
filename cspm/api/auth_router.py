@@ -85,6 +85,9 @@ def create_key(
     role = payload.get("role", "analyst")
     if role not in ("viewer", "analyst", "admin"):
         raise HTTPException(status_code=400, detail="Invalid role.")
+    from cspm.billing.entitlements import check_api_key_limit
+
+    check_api_key_limit(db, ctx.org_id)
     record, plaintext = create_api_key(
         db, ctx.org_id, payload.get("name", "api-key"), role
     )

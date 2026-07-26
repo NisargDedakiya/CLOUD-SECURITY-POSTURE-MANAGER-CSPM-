@@ -89,6 +89,21 @@ class Settings:
         self.sentry_dsn: str | None = os.getenv("CSPM_SENTRY_DSN")
         self.metrics_enabled: bool = _get_bool("CSPM_METRICS_ENABLED", default=True)
 
+        # ---- Billing / subscriptions --------------------------------------
+        # "manual" (no external gateway; plans set directly) or "stripe".
+        self.billing_mode: str = os.getenv("CSPM_BILLING_MODE", "manual").lower()
+        self.stripe_secret_key: str | None = os.getenv("CSPM_STRIPE_SECRET_KEY")
+        self.stripe_webhook_secret: str | None = os.getenv("CSPM_STRIPE_WEBHOOK_SECRET")
+        # Stripe Price IDs per plan (from your Stripe dashboard).
+        self.stripe_price_starter: str | None = os.getenv("CSPM_STRIPE_PRICE_STARTER")
+        self.stripe_price_pro: str | None = os.getenv("CSPM_STRIPE_PRICE_PRO")
+        self.billing_success_url: str = os.getenv(
+            "CSPM_BILLING_SUCCESS_URL", "http://localhost:8000/#/billing?status=success"
+        )
+        self.billing_cancel_url: str = os.getenv(
+            "CSPM_BILLING_CANCEL_URL", "http://localhost:8000/#/billing?status=cancel"
+        )
+
         # ---- Integrations --------------------------------------------------
         self.slack_webhook_url: str | None = os.getenv("CSPM_SLACK_WEBHOOK_URL")
         self.generic_webhook_url: str | None = os.getenv("CSPM_WEBHOOK_URL")

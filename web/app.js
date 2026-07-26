@@ -31,9 +31,11 @@ async function api(path, opts = {}) {
   });
   if (res.status === 401) { logout(); throw new Error("Session expired — please sign in."); }
   if (!res.ok) {
-    let detail = `${res.status} ${res.statusText}`;
-    try { detail = (await res.json()).detail || detail; } catch {}
-    throw new Error(detail);
+    let detail = `${res.status} ${res.statusText}`, body = {};
+    try { body = await res.json(); detail = body.detail || detail; } catch {}
+    const err = new Error(detail);
+    if (res.status === 402) { err.upgrade = body.upgrade_to || "pro"; }
+    throw err;
   }
   if (res.status === 204) return null;
   const ct = res.headers.get("content-type") || "";
@@ -125,8 +127,9 @@ function getVar(name) { return getComputedStyle(document.documentElement).getPro
 
 /* ---------- data helpers ---------- */
 async function loadAll() {
+  const safe = (p) => p.catch(() => []);
   const [accounts, findings, drift] = await Promise.all([
-    api("/accounts"), api("/findings?limit=200"), api("/drift?limit=200"),
+    safe(api("/accounts")), safe(api("/findings?limit=200")), safe(api("/drift?limit=200")),
   ]);
   const compliance = {};
   await Promise.all(FRAMEWORKS.map(async (f) => {
@@ -146,7 +149,8 @@ views.overview = async (mount) => {
   const open = d.findings.filter((f) => f.status === "open");
   const sevCounts = SEVS.map((s) => ({ label: s, value: open.filter((f) => f.severity === s).length, color: SEV_COLORS[s] }));
   const total = open.length;
-  const avgScore = FRAMEWORKS.reduce((a, f) => a + (d.compliance[f]?.score ?? 100), 0) / FRAMEWORKS.length;
+  const scored = FRAMEWORKS.map((f) => d.compliance[f]?.score).filter((s) => s != null);
+  const avgScore = scored.length ? scored.reduce((a, s) => a + s, 0) / scored.length : 100;
 
   mount.innerHTML = `
     <div class="grid cols-4">
@@ -320,6 +324,68 @@ views.apikeys = async (mount) => {
     catch (e) { toast(e.message, "error"); } });
 };
 
+views.billing = async (mount) => {
+  mount.innerHTML = skeletonGrid();
+  const [data, sub] = await Promise.all([api("/billing/plans"), api("/billing/subscription")]);
+  const u = sub.usage;
+  const meter = (o) => {
+    if (o.limit === "unlimited") return `${o.used} / ∞`;
+    const pct = Math.min(100, (o.used / Math.max(1, o.limit)) * 100);
+    const col = pct >= 100 ? "var(--high)" : pct >= 80 ? "var(--medium)" : "var(--accent)";
+    return `${o.used} / ${o.limit}
+      <div style="background:var(--bg-2);border-radius:6px;height:8px;margin-top:.3rem;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${col}"></div></div>`;
+  };
+  const featLabels = {
+    multi_cloud: "Multi-cloud (GCP/Azure)", drift: "Drift detection", integrations: "Integrations",
+    evidence_export: "Evidence export", trends: "Compliance trends", api_keys: "API keys",
+    sso_scim: "SSO / SCIM", prowler: "Prowler checks", auto_remediation: "Auto-remediation",
+    priority_support: "Priority support",
+  };
+  mount.innerHTML = `
+    <div class="grid cols-3">
+      <div class="card"><h3>Current plan</h3><div class="kpi"><div class="value">${esc((data.current_plan||"free").toUpperCase())}</div>
+        <div class="label">status: ${esc(sub.status)}</div></div></div>
+      <div class="card"><h3>Cloud accounts</h3><div style="font-weight:700">${meter(u.accounts)}</div></div>
+      <div class="card"><h3>Scans this month</h3><div style="font-weight:700">${meter(u.scans_this_month)}</div></div>
+    </div>
+    <div class="section-title"><h2>Plans</h2></div>
+    <div class="grid cols-4">
+      ${data.plans.map((p) => planCard(p, data.current_plan)).join("")}
+    </div>
+    <div class="section-title"><h2>Feature comparison</h2></div>
+    <div class="card"><table><thead><tr><th>Feature</th>${data.plans.map((p) => `<th>${esc(p.name)}</th>`).join("")}</tr></thead>
+      <tbody>${Object.keys(featLabels).map((f) => `<tr><td>${featLabels[f]}</td>
+        ${data.plans.map((p) => `<td>${p.features.includes(f) ? "✅" : "—"}</td>`).join("")}</tr>`).join("")}
+        <tr><td>Cloud accounts</td>${data.plans.map((p) => `<td>${p.limits.max_accounts === -1 ? "∞" : p.limits.max_accounts}</td>`).join("")}</tr>
+        <tr><td>Scans / month</td>${data.plans.map((p) => `<td>${p.limits.max_scans_per_month === -1 ? "∞" : p.limits.max_scans_per_month}</td>`).join("")}</tr>
+      </tbody></table></div>`;
+
+  $$("[data-plan]", mount).forEach((b) => b.onclick = async () => {
+    const plan = b.dataset.plan;
+    if (plan === "enterprise") { modal("Contact sales", `<p>Enterprise plans include SSO/SCIM, unlimited scale, RLS isolation, and dedicated support.</p><p>Email <b>sales@cspm.example</b> to get started.</p><div class="actions"><button class="btn primary" data-x>Close</button></div>`, (bd, cl) => $("[data-x]", bd).onclick = cl); return; }
+    b.disabled = true; b.textContent = "Processing…";
+    try {
+      const r = await api("/billing/checkout", { method: "POST", body: JSON.stringify({ plan }) });
+      if (r.mode === "stripe" && r.url) { window.location.href = r.url; return; }
+      toast(`Upgraded to ${plan.toUpperCase()}`, "success"); views.billing(mount);
+    } catch (e) { toast(e.message, "error"); b.disabled = false; b.textContent = "Choose"; }
+  });
+};
+
+function planCard(p, current) {
+  const isCurrent = p.id === current;
+  const price = p.custom_pricing ? "Custom" : (p.price_usd_month === 0 ? "Free" : `$${p.price_usd_month}<span style="font-size:.8rem;color:var(--muted)">/mo</span>`);
+  return `<div class="card" style="${isCurrent ? "border-color:var(--accent)" : ""}">
+    <h3>${esc(p.name)} ${isCurrent ? '<span class="pill active">current</span>' : ""}</h3>
+    <div style="font-size:1.6rem;font-weight:800;margin:.25rem 0">${price}</div>
+    <p style="color:var(--muted);font-size:.82rem;min-height:2.4em">${esc(p.blurb)}</p>
+    ${isCurrent ? `<button class="btn full" disabled>Current plan</button>`
+      : p.id === "free" ? ""
+      : `<button class="btn primary full" data-plan="${p.id}">${p.custom_pricing ? "Contact sales" : "Choose"}</button>`}
+  </div>`;
+}
+
 /* ---------- shared view fragments ---------- */
 function kpi(value, label, cls = "") {
   return `<div class="card kpi"><div class="value ${cls}">${esc(String(value))}</div><div class="label">${esc(label)}</div></div>`;
@@ -409,9 +475,22 @@ async function route() {
   const name = (location.hash.replace("#/", "") || "overview").split("?")[0];
   const view = views[name] || views.overview;
   $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === name));
-  $("#crumb").textContent = { overview: "Overview", accounts: "Cloud Accounts", findings: "Findings", compliance: "Compliance", drift: "Drift", apikeys: "API Keys" }[name] || "Overview";
+  $("#crumb").textContent = { overview: "Overview", accounts: "Cloud Accounts", findings: "Findings", compliance: "Compliance", drift: "Drift", apikeys: "API Keys", billing: "Billing & Plans" }[name] || "Overview";
   const mount = $("#view");
-  try { await view(mount); } catch (e) { mount.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+  try { await view(mount); }
+  catch (e) {
+    if (e.upgrade) mount.innerHTML = upgradeCTA(e.message, e.upgrade);
+    else mount.innerHTML = `<div class="card empty">${esc(e.message)}</div>`;
+  }
+}
+
+function upgradeCTA(msg, plan) {
+  return `<div class="card" style="text-align:center;padding:3rem">
+    <div style="font-size:2.5rem">🔒</div>
+    <h2 style="margin:.5rem 0">This feature needs an upgrade</h2>
+    <p style="color:var(--muted)">${esc(msg)}</p>
+    <a class="btn primary" href="#/billing" style="display:inline-block;margin-top:1rem">View plans → upgrade to ${esc(plan)}</a>
+  </div>`;
 }
 
 /* ---------- auth screens ---------- */

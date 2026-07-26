@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from cspm import __version__
 from cspm.api.auth_router import key_router, scim_router
+from cspm.api.billing_router import billing_router
 from cspm.api.middleware import (
     RateLimitMiddleware,
     RequestContextMiddleware,
@@ -52,9 +53,21 @@ app.add_middleware(RequestContextMiddleware)
 app.add_middleware(RateLimitMiddleware)
 init_otel(app)
 install_error_handlers(app)
+
+
+@app.exception_handler(__import__("cspm.billing.entitlements", fromlist=["EntitlementError"]).EntitlementError)
+async def _entitlement_handler(request, exc):  # noqa: ANN001
+    from fastapi.responses import JSONResponse
+
+    # 402 Payment Required signals the UI to prompt an upgrade.
+    return JSONResponse(
+        status_code=402,
+        content={"detail": str(exc), "upgrade_to": getattr(exc, "upgrade_to", "pro")},
+    )
 app.include_router(router)
 app.include_router(scim_router)
 app.include_router(key_router)
+app.include_router(billing_router)
 
 
 @app.get("/api/v1/cspm/health")

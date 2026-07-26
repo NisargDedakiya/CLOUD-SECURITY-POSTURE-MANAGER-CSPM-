@@ -19,8 +19,17 @@ def db():
 
 @pytest.fixture()
 def org(db):
+    """An org on the Enterprise plan (so functional tests aren't billing-gated).
+
+    Entitlement/plan behavior is covered separately in test_billing.py with
+    explicitly lower-tier orgs.
+    """
+    from cspm.models import Subscription
+
     o = Organisation(name="Acme", slug="acme")
     db.add(o)
     db.commit()
     db.refresh(o)
+    db.add(Subscription(org_id=o.id, plan="enterprise", status="active"))
+    db.commit()
     return o

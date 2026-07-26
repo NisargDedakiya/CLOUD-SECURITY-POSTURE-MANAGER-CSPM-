@@ -160,6 +160,8 @@ def _record_compliance_snapshot(db: Session, account: CloudAccount, scan: ScanRu
 
 def _maybe_alert(account: CloudAccount, scan: ScanRun) -> None:
     """Fire outbound alerts for high/critical findings from this scan."""
+    from cspm.billing.entitlements import has_feature
+    from cspm.billing.plans import Feature
     from cspm.integrations import dispatch_alert, notifiers_configured
 
     if not notifiers_configured():
@@ -169,6 +171,9 @@ def _maybe_alert(account: CloudAccount, scan: ScanRun) -> None:
 
     db = SessionLocal()
     try:
+        # Outbound integrations are a paid feature.
+        if not has_feature(db, account.org_id, Feature.INTEGRATIONS):
+            return
         findings = (
             db.query(FindingRecord)
             .filter_by(scan_run_id=scan.id)

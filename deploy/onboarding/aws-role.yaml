@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Aegis CSPM — read-only cross-account audit role. Creates an IAM role that Aegis
+  assumes (via STS with an External ID) to run non-intrusive security audits.
+  Read-only: attaches AWS-managed SecurityAudit + ViewOnlyAccess. Aegis never
+  modifies your resources.
+
+Parameters:
+  AegisAccountId:
+    Type: String
+    Description: The Aegis platform AWS account ID that is allowed to assume this role.
+    AllowedPattern: "^[0-9]{12}$"
+    ConstraintDescription: Must be a 12-digit AWS account ID.
+  ExternalId:
+    Type: String
+    Description: >
+      The per-organisation External ID shown in the Aegis "Connect AWS" dialog.
+      Prevents the confused-deputy problem. Keep it secret.
+    MinLength: 8
+    NoEcho: true
+  RoleName:
+    Type: String
+    Default: AegisCSPMAuditRole
+    Description: Name for the created IAM role.
+
+Resources:
+  AegisAuditRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: Read-only role assumed by Aegis CSPM for security auditing.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AegisAccountId}:root"
+            Action: "sts:AssumeRole"
+            Condition:
+              StringEquals:
+                "sts:ExternalId": !Ref ExternalId
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/SecurityAudit"
+        - "arn:aws:iam::aws:policy/job-function/ViewOnlyAccess"
+      Tags:
+        - Key: managed-by
+          Value: aegis-cspm
+        - Key: purpose
+          Value: read-only-security-audit
+
+Outputs:
+  RoleArn:
+    Description: Paste this ARN into the Aegis "Connect AWS account" dialog.
+    Value: !GetAtt AegisAuditRole.Arn
+  ExternalIdEcho:
+    Description: The External ID this role trusts (must match Aegis).
+    Value: !Ref ExternalId

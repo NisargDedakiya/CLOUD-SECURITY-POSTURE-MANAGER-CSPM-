@@ -116,12 +116,21 @@ cspm --demo --format json   # machine-readable output
 ```
 </details>
 
-### Option B — API + dashboard
+### Option B — the web app
 
 ```bash
 uvicorn cspm.api.app:app --reload
-# open http://127.0.0.1:8000  → set an Org id, connect an account, run a scan
+# open http://127.0.0.1:8000
+#   1. Sign in (Dev/Org mode → org "demo-org", role admin)
+#   2. Cloud Accounts → "✨ Load demo data"  (populates findings without cloud creds)
+#   3. Explore Overview, Findings, Compliance, Drift, API Keys
 ```
+
+The bundled single-page app (in `web/`, dependency-free) is a full product UI:
+an **Overview** dashboard with charts, **Cloud Accounts** management (connect
+AWS/GCP/Azure), a **Findings** explorer with remediation snippets, **Compliance**
+scores + trend lines, **Drift** review (approve/reject), and **API Key**
+management. It authenticates via dev headers, a JWT, or an API key.
 
 ### Option C — full stack (Docker)
 

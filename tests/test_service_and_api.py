@@ -62,7 +62,7 @@ def client(db, org, monkeypatch):
     app.dependency_overrides[router_mod.get_db] = lambda: db
     monkeypatch.setattr(
         router_mod, "run_audit",
-        lambda d, acct: real_run_audit(d, acct, session=FakeAWSSession()),
+        lambda d, acct, **kw: real_run_audit(d, acct, session=FakeAWSSession()),
     )
 
     # Make AWS connector validation use the fake session (no live AssumeRole).

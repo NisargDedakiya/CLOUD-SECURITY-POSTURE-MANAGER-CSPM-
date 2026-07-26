@@ -193,6 +193,35 @@ def trigger_scan(
     return scan
 
 
+@router.post("/dev/seed", status_code=201)
+def dev_seed(
+    ctx: OrgContext = Depends(WRITE),
+    db: Session = Depends(get_db),
+):
+    """Dev/demo helper: create a mock AWS account and run a scan with sample data.
+
+    Disabled in production. Lets the dashboard be explored without cloud creds.
+    """
+    if _settings.is_production:
+        raise HTTPException(status_code=404, detail="Not available.")
+    from cspm.fakes import FakeAWSSession
+
+    account = CloudAccount(
+        org_id=ctx.org_id,
+        provider="aws",
+        label="demo-aws",
+        role_arn="arn:aws:iam::123456789012:role/demo",
+        external_id="demo",
+        status="active",
+        last_validated_at=_now(),
+    )
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    scan = run_audit(db, account, session=FakeAWSSession())
+    return {"account_id": account.id, "scan_run_id": scan.id, "findings": scan.findings_count}
+
+
 @router.get("/scans/{scan_run_id}", response_model=ScanRunOut)
 def scan_status(
     scan_run_id: str,

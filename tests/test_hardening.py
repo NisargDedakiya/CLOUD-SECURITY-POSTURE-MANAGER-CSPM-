@@ -71,7 +71,7 @@ def client(db, org, monkeypatch):
     app.dependency_overrides[router_mod.get_db] = lambda: db
     monkeypatch.setattr(
         router_mod, "run_audit",
-        lambda d, acct: real_run_audit(d, acct, session=FakeAWSSession()),
+        lambda d, acct, **kw: real_run_audit(d, acct, session=FakeAWSSession()),
     )
     real_get_connector = router_mod.get_connector
 
@@ -134,3 +134,28 @@ def test_pagination_sets_total_count(client):
 
 def test_ready_probe(client):
     assert client.get("/api/v1/cspm/ready").json()["status"] == "ready"
+
+
+def test_dev_seed_populates_dashboard(client):
+    r = client.post("/api/v1/cspm/dev/seed")
+    assert r.status_code == 201
+    assert r.json()["findings"] > 0
+    # Dashboard data is now available.
+    assert client.get("/api/v1/cspm/accounts").json()
+    assert client.get("/api/v1/cspm/findings").json()
+    trend = client.get("/api/v1/cspm/compliance/cis_aws_v2/trend").json()
+    assert trend["series"]  # a snapshot was recorded
+
+
+def test_remediation_endpoint(client):
+    client.post("/api/v1/cspm/dev/seed")
+    fid = client.get("/api/v1/cspm/findings").json()[0]["id"]
+    r = client.get(f"/api/v1/cspm/findings/{fid}/remediation")
+    assert r.status_code == 200
+    assert "snippets" in r.json()
+
+
+def test_audit_verify_endpoint(client):
+    client.post("/api/v1/cspm/dev/seed")
+    r = client.get("/api/v1/cspm/audit/verify")
+    assert r.status_code == 200 and r.json()["intact"] is True

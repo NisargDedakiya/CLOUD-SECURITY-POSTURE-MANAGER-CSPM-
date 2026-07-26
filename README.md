@@ -1,128 +1,265 @@
-# Tool 6 — Cloud Security Posture Manager (CSPM)
+<div align="center">
 
-Continuously audits a customer's **AWS, GCP, and Azure** accounts against CIS
-Benchmarks and security best practices, finding misconfigurations before
-attackers exploit them. Read-only and non-intrusive — it never modifies customer
-cloud resources.
+# 🛡️ Cloud Security Posture Manager (CSPM)
 
-Built to the Track 2 SaaS platform spec: CSPM is **not standalone**, it mounts as
-a router at `/api/v1/cspm/` on the shared FastAPI backend (auth, orgs, billing,
-audit log, reports). The shared foundation is represented here by lightweight,
-swappable stubs in `cspm/shared/`.
+### Continuously audit your **AWS · GCP · Azure** accounts against CIS Benchmarks and security best practices — and catch misconfigurations before attackers do.
 
-## Modules (spec build order)
+[![CI](https://github.com/nisargdedakiya/cloud-security-posture-manager-cspm-/actions/workflows/ci.yml/badge.svg)](https://github.com/nisargdedakiya/cloud-security-posture-manager-cspm-/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)
+![Ruff](https://img.shields.io/badge/lint-ruff-261230?logo=ruff&logoColor=white)
+![License](https://img.shields.io/badge/license-internal-lightgrey)
 
-| # | Module | Package | What it does |
-|---|--------|---------|--------------|
-| 6.1 | Cloud Account Connector | `cspm/connectors/` | Connect AWS (STS AssumeRole + external id), GCP (SA key), Azure (SP) with least-privilege, read-only creds. Validates then stores secrets AES-256 encrypted. |
-| 6.2 | AWS Security Audit Engine | `cspm/auditors/` | `AWSAuditor` class with independently-testable `check_*` methods (IAM, S3, EC2/VPC, RDS, CloudTrail, KMS, GuardDuty). |
-| 6.3 | Compliance Mapping Engine | `cspm/compliance/` | Maps checks → CIS AWS v2 / SOC 2 / ISO 27001 / PCI DSS v4 controls; per-framework score; evidence export; remediation priority. |
-| 6.4 | Drift Detection | `cspm/drift/` | Baseline snapshot (JSONB) + `deepdiff` structural comparison; approval workflow; security-sensitive changes flagged. |
+**Read-only · Non-intrusive · Multi-cloud · Compliance-aware**
 
-## Architecture
+</div>
 
+---
+
+## ✨ What it does
+
+CSPM connects to your cloud accounts with **least-privilege, read-only** credentials,
+enumerates your resources, and runs a suite of security checks — then maps every
+finding to the compliance frameworks your auditors care about and watches for
+configuration **drift** over time. It **never modifies** your cloud resources.
+
+> **Tool 6** of the Track 2 SaaS Security Platform. It is not standalone — it mounts
+> as a router at `/api/v1/cspm/` on the shared platform backend (auth, orgs, billing,
+> audit log, reports). Those shared pieces are represented here by swappable stubs.
+
+<div align="center">
+
+| | |
+|---|---|
+| 🔌 **Connect** | AWS (STS AssumeRole + external id), GCP (service account), Azure (service principal) |
+| 🔎 **Audit** | 13+ AWS checks, plus GCP & Azure engines — IAM, S3, EC2/VPC, RDS, KMS, CloudTrail, GuardDuty… |
+| 📊 **Comply** | CIS AWS v2 · SOC 2 · ISO 27001 · PCI DSS v4 — per-framework scores + evidence export |
+| 🌊 **Detect drift** | Baseline snapshots + structural deep-diff; approve or reject each change |
+| 🔐 **Secure** | AES-256-GCM encrypted credentials, RBAC, immutable audit log, request tracing |
+
+</div>
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    subgraph Client
+        UI[Web Dashboard]
+        CLI[CLI]
+    end
+    UI & CLI --> API["/api/v1/cspm/ (FastAPI router)"]
+
+    subgraph CSPM
+        API --> SVC[Service layer]
+        SVC --> CONN[6.1 Connectors]
+        SVC --> AUD[6.2 Auditors]
+        SVC --> DRIFT[6.4 Drift detector]
+        AUD --> COMP[6.3 Compliance engine]
+    end
+
+    CONN -->|assume role / SA / SP| CLOUDS[(AWS · GCP · Azure)]
+    AUD -->|read-only APIs| CLOUDS
+    SVC --> DB[(PostgreSQL)]
+    API -->|enqueue| Q[Celery · Redis]
+    Q --> WORKER[Worker: audits high / drift default / alerts critical]
+    WORKER --> DB
 ```
-cspm/
-  config.py         env-driven settings
-  db.py             SQLAlchemy engine/session/Base
-  models.py         ORM for cspm_* tables (spec Section 4)
-  schemas.py        Pydantic request/response (secrets never serialized)
-  security/crypto.py AES-256-GCM field encryption
-  shared/           stubs for the shared platform (orgs, users, auth deps)
-  connectors/       Module 6.1
-  auditors/         Module 6.2  (+ Finding value object)
-  compliance/       Module 6.3  (mappings seed + scoring/evidence)
-  drift/            Module 6.4  (deepdiff detector)
-  service.py        orchestration shared by API + Celery
-  celery_app.py     shared Celery app (4 queues) reference
-  tasks.py          run_aws_audit (high queue), run_drift_check (default)
-  api/router.py     /api/v1/cspm/ endpoints (spec Section 6)
-  api/app.py        standalone FastAPI app + dashboard
-  cli.py            AWS audit CLI (--demo for no-credential run)
-  fakes.py          in-memory fake AWS session for demos/tests
-web/                dashboard
-migrations/         001_cspm_schema.sql (Postgres)
-tests/              39 tests
-```
 
-## Quick start (no cloud credentials)
+**Flow:** a connector validates credentials → the service layer runs the right
+auditor → each `check_*` method emits a `Finding` → findings are persisted,
+deduplicated, scored against compliance frameworks, and drift is compared against
+an approved baseline.
+
+---
+
+## 📦 Modules (spec build order)
+
+| # | Module | Package | Highlights |
+|---|--------|---------|------------|
+| **6.1** | Cloud Account Connector | `cspm/connectors/` | Least-privilege validation; **AES-256-GCM** encrypted secret storage; AWS external-id (confused-deputy defense) |
+| **6.2** | Security Audit Engine | `cspm/auditors/` | Class-based, independently-testable `check_*` methods; `AWSAuditor` + `GCPAuditor` + `AzureAuditor` |
+| **6.3** | Compliance Mapping Engine | `cspm/compliance/` | check → CIS/SOC2/ISO27001/PCI-DSS controls; per-framework scoring; evidence export; remediation priority |
+| **6.4** | Drift Detection | `cspm/drift/` | JSONB baselines + `deepdiff`; security-sensitive changes flagged; approve/reject workflow |
+
+---
+
+## 🚀 Quick start
+
+### Option A — zero credentials (see the whole pipeline)
 
 ```bash
 pip install -e ".[dev]"
 
-# CLI: full audit against an in-memory fake AWS account
-cspm --demo                 # table with findings + compliance scores
-cspm --demo --format json
-
-# API + dashboard
-uvicorn cspm.api.app:app --reload
-#   open http://127.0.0.1:8000  (set an Org id, connect an account, scan)
+cspm --demo                 # full audit against an in-memory fake AWS account
+cspm --demo --format json   # machine-readable output
 ```
 
-Every API request is org-scoped via the `X-Org-Id` header (the seam where the
-shared JWT/RBAC auth is wired in).
-
-## API surface (`/api/v1/cspm/`)
+<details>
+<summary>📟 Sample output</summary>
 
 ```
-POST   /accounts                        Connect a cloud account
-GET    /accounts                        List connected accounts
-POST   /accounts/{id}/validate          Re-validate credentials
-DELETE /accounts/{id}                   Disconnect
-POST   /accounts/{id}/scan              Trigger an audit
-GET    /scans/{scan_run_id}             Scan run status
-GET    /findings                        List findings (severity/status/account)
-PATCH  /findings/{id}                   Update finding status
-GET    /compliance/{framework}          Compliance score + detail
-GET    /compliance/{framework}/evidence Evidence export
-GET    /drift                           List drift events
-POST   /drift/{id}/approve              Approve drift (updates baseline)
-POST   /drift/{id}/reject               Mark as violation (creates finding)
+========================================================================
+  AWS SECURITY AUDIT — Tool 6 CSPM
+========================================================================
+  Findings: 25
+  Compliance scores:
+    cis_aws_v2       0.0%  (0/13 controls)
+    soc2             0.0%  (0/13 controls)
+  ----------------------------------------------------------------------
+  [CRITICAL] Root account MFA not enabled
+  [HIGH    ] S3 Public Access Block Not Fully Enabled  arn:aws:s3:::public-bucket
+  [HIGH    ] Security group allows 0.0.0.0/0 to SSH    us-east-1/sg-open
+  [CRITICAL] RDS instance is publicly accessible       us-east-1/prod-db
 ```
+</details>
 
-## Security notes (per spec 6.1)
-
-- AWS uses **STS AssumeRole with an external id** (per-org secret) to prevent the
-  confused-deputy problem.
-- Cloud secrets (AWS secret keys, GCP SA JSON, Azure client secrets) are
-  **AES-256-GCM encrypted** at rest and **never returned to the frontend** —
-  `CloudAccountOut` has no secret fields.
-- Validation runs the cheapest read-only call per provider
-  (`sts.get_caller_identity()` for AWS).
-
-## Production hardening
-
-- **Config guards** (`CSPM_ENV=production`): fails fast unless `CSPM_ENCRYPTION_KEY`
-  is set, `CSPM_DATABASE_URL` is Postgres, and `CSPM_EAGER_TASKS=false`. See
-  `.env.example`.
-- **Observability**: structured JSON logging, per-request `X-Request-Id`
-  propagation, a global 500 handler, and immutable `audit_log` writes on every
-  mutation.
-- **RBAC**: `viewer` / `analyst` / `admin` (via `X-Role`, the JWT/RBAC seam).
-  Connect/scan/patch/drift require analyst+, disconnect requires admin.
-- **Bounded lists**: every list endpoint takes `limit`/`offset` and returns
-  `X-Total-Count`.
-- **Async scans**: with `CSPM_EAGER_TASKS=false`, `POST /accounts/{id}/scan`
-  persists a queued run and enqueues `cspm.run_aws_audit` on the `high` queue;
-  poll `GET /scans/{id}`. Security-sensitive drift re-routes an alert to `critical`.
-- **Health/readiness**: `/api/v1/cspm/health` and `/api/v1/cspm/ready` (DB ping).
-
-## Deployment
+### Option B — API + dashboard
 
 ```bash
-# One-command local stack: Postgres + Redis + API + Celery worker
+uvicorn cspm.api.app:app --reload
+# open http://127.0.0.1:8000  → set an Org id, connect an account, run a scan
+```
+
+### Option C — full stack (Docker)
+
+```bash
 export CSPM_ENCRYPTION_KEY=$(python -c "from cspm.security.crypto import generate_key; print(generate_key())")
 docker compose up --build
-# API on http://localhost:8000 ; migrations run automatically (alembic upgrade head)
+# API on :8000 · Postgres · Redis · Celery worker · migrations run automatically
 ```
 
-- **Migrations**: `alembic upgrade head` (or the raw `migrations/001_cspm_schema.sql`).
-- **Live cloud**: `pip install -e ".[gcp,azure]"`; AWS uses bundled boto3.
-- **CI**: `.github/workflows/ci.yml` runs `ruff` + `pytest` on every push/PR.
+---
 
-## Tests & lint
+## 🌐 API surface (`/api/v1/cspm/`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/accounts` | Connect a cloud account |
+| `GET` | `/accounts` | List connected accounts *(paginated)* |
+| `POST` | `/accounts/{id}/validate` | Re-validate credentials |
+| `DELETE` | `/accounts/{id}` | Disconnect *(admin)* |
+| `POST` | `/accounts/{id}/scan` | Trigger an audit |
+| `GET` | `/scans/{scan_run_id}` | Scan run status |
+| `GET` | `/findings` | List findings *(filter by severity/status/account)* |
+| `PATCH` | `/findings/{id}` | Update finding status |
+| `GET` | `/compliance/{framework}` | Compliance score + detail |
+| `GET` | `/compliance/{framework}/evidence` | Evidence export |
+| `GET` | `/drift` | List drift events |
+| `POST` | `/drift/{id}/approve` | Approve drift (updates baseline) |
+| `POST` | `/drift/{id}/reject` | Mark as violation (creates finding) |
+
+Every request is **org-scoped** via `X-Org-Id`; mutations are **RBAC-gated** via
+`X-Role` (`viewer` / `analyst` / `admin`) — the seam where the shared JWT/SSO auth
+is wired in.
+
+---
+
+## 🔐 Security model
+
+- **STS AssumeRole with a per-org external id** to prevent the confused-deputy problem.
+- Cloud secrets (AWS keys, GCP SA JSON, Azure client secret) are **AES-256-GCM
+  encrypted at rest** and **never returned to the frontend**.
+- Validation uses the cheapest possible read-only call per provider.
+- Every mutating action is written to an **immutable audit log**.
+- Production config **fails fast** if the encryption key / Postgres / async tasks
+  aren't set (`CSPM_ENV=production`).
+
+---
+
+## ✅ Compliance frameworks
+
+<div align="center">
+
+`CIS AWS Foundations v2` · `CIS GCP v2` · `CIS Azure v2` · `SOC 2` · `ISO 27001` · `PCI DSS v4`
+
+</div>
+
+Each check maps to one or more controls. The score is
+`checks_passed / checks_applicable` per framework, and the evidence export lists
+each control's pass/fail with the offending resource and a timestamp — ready for
+your auditors.
+
+---
+
+## 🧰 Tech stack
+
+**Python 3.11** · **FastAPI** · **SQLAlchemy 2.0** + **Alembic** · **PostgreSQL** ·
+**Celery** + **Redis** · **boto3 / google-auth / azure-identity** · **deepdiff** ·
+**cryptography** · **pytest** · **ruff**
+
+---
+
+## 🗂️ Project layout
+
+```
+cspm/
+├── config.py          env-driven settings + prod guards
+├── db.py              SQLAlchemy engine / session / Base
+├── models.py          ORM for cspm_* tables (spec Section 4)
+├── schemas.py         Pydantic I/O (secrets never serialized)
+├── security/crypto.py AES-256-GCM field encryption
+├── logging_config.py  structured JSON logging + request ids
+├── shared/            stubs for the shared platform (orgs, users, auth, audit)
+├── connectors/        6.1  cloud account connectors
+├── auditors/          6.2  AWS / GCP / Azure audit engines
+├── compliance/        6.3  mappings + scoring + evidence
+├── drift/             6.4  deepdiff drift detector
+├── service.py         orchestration shared by API + Celery
+├── tasks.py           Celery tasks (high / default / critical queues)
+├── api/               router, app, middleware, pagination
+├── cli.py             audit CLI (--demo for no-credential runs)
+└── fakes.py           in-memory fakes for demos/tests
+web/                   dashboard (HTML/CSS/JS)
+alembic/ · migrations/ database migrations
+tests/                 49 tests across every module
+```
+
+---
+
+## 🧪 Development
 
 ```bash
-pytest -q              # 49 tests across every module
-ruff check cspm tests  # lint
+pip install -e ".[dev]"
+pytest -q                 # run the suite (49 tests)
+ruff check cspm tests     # lint
 ```
+
+### Adding a check
+
+Subclass the auditor pattern — each check is an independently-testable method
+returning `list[Finding]`:
+
+```python
+def check_my_rule(self) -> list[Finding]:
+    findings = []
+    for resource in self.session.client("s3").list_buckets()["Buckets"]:
+        if not compliant(resource):
+            findings.append(Finding(
+                resource=resource["Name"],
+                check="My rule title",
+                check_id="aws_my_rule",
+                severity="high",
+                remediation="How to fix it.",
+            ))
+    return findings
+```
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Live GCP/Azure collectors (SDK plumbing behind the proven interfaces)
+- [ ] AWS region auto-discovery
+- [ ] PDF/CSV evidence export via the shared reports (Tool 3) pipeline
+- [ ] Celery Beat schedule for the 6-hour drift cadence
+- [ ] Real JWT/SSO auth wired into the `X-Org-Id` / `X-Role` seam
+- [ ] Secrets-manager-backed key management
+
+---
+
+<div align="center">
+<sub>Part of the Track 2 SaaS Security Platform · Phase 2, Build Order #2</sub>
+</div>

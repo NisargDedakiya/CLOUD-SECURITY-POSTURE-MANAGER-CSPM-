@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cloud Security Posture Manager</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>&#128737; Cloud Security Posture Manager</h1>
+    <div class="controls">
+      <label><input type="checkbox" class="cloud-filter" value="aws" checked /> AWS</label>
+      <label><input type="checkbox" class="cloud-filter" value="gcp" checked /> GCP</label>
+      <label><input type="checkbox" class="cloud-filter" value="azure" checked /> Azure</label>
+      <button id="scan-btn">Run Scan</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="summary" class="cards" aria-live="polite"></section>
+
+    <section class="findings-section">
+      <div class="findings-header">
+        <h2>Findings</h2>
+        <select id="sev-filter">
+          <option value="">All severities</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
+      <div id="findings"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

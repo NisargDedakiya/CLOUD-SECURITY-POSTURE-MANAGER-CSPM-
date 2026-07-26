@@ -13,7 +13,8 @@ try:  # pragma: no cover - celery optional in some dev/test envs
     from celery import Celery
     from kombu import Queue
 
-    app = Celery("track2", broker=get_settings().redis_url)
+    _settings = get_settings()
+    app = Celery("track2", broker=_settings.redis_url)
     app.conf.task_queues = (
         Queue("critical", routing_key="critical"),
         Queue("high", routing_key="high"),
@@ -21,5 +22,19 @@ try:  # pragma: no cover - celery optional in some dev/test envs
         Queue("low", routing_key="low"),
     )
     app.conf.task_default_queue = "default"
+
+    # Scheduled work (Celery Beat): continuous drift + nightly retention purge.
+    app.conf.beat_schedule = {
+        "drift-sweep": {
+            "task": "cspm.scheduled_drift_sweep",
+            "schedule": _settings.drift_interval_hours * 3600.0,
+            "options": {"queue": "default"},
+        },
+        "retention-purge": {
+            "task": "cspm.retention_purge",
+            "schedule": 24 * 3600.0,
+            "options": {"queue": "low"},
+        },
+    }
 except Exception:  # noqa: BLE001
     app = None

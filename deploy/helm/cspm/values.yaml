@@ -1,0 +1,38 @@
+image:
+  repository: ghcr.io/nisargdedakiya/cspm
+  tag: "0.4.0"
+  pullPolicy: IfNotPresent
+
+env:
+  CSPM_ENV: production
+  CSPM_AUTH_MODE: jwks
+  CSPM_EAGER_TASKS: "false"
+  CSPM_JSON_LOGS: "true"
+  CSPM_KEY_PROVIDER: aws_kms
+# Sensitive values (CSPM_DATABASE_URL, CSPM_REDIS_URL, CSPM_OIDC_*, CSPM_KMS_KEY_ID,
+# integration webhooks) come from a Kubernetes Secret referenced below.
+existingSecret: cspm-secrets
+
+api:
+  replicas: 3
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+
+worker:
+  replicas: 2
+  queues: "high,default,critical,low"
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+beat:
+  enabled: true
+
+service:
+  port: 8000

@@ -124,8 +124,63 @@ def run_audit(
     scan.checks_run = len(auditor.list_checks())
     scan.findings_count = persisted
     db.commit()
+    _record_compliance_snapshot(db, account, scan)
+    _maybe_alert(account, scan)
     db.refresh(scan)
     return scan
+
+
+def _record_compliance_snapshot(db: Session, account: CloudAccount, scan: ScanRun) -> None:
+    """Snapshot per-framework compliance for this account so it can be trended."""
+    from cspm.compliance import compute_scores
+    from cspm.models import ComplianceSnapshot
+
+    rows = (
+        db.query(FindingRecord.check_id)
+        .filter(FindingRecord.cloud_account_id == account.id, FindingRecord.status == "open")
+        .distinct()
+        .all()
+    )
+    failed = {r[0] for r in rows}
+    for framework, data in compute_scores(failed).items():
+        db.add(
+            ComplianceSnapshot(
+                org_id=account.org_id,
+                cloud_account_id=account.id,
+                scan_run_id=scan.id,
+                framework=framework,
+                score=data["score"],
+                checks_passed=data["checks_passed"],
+                checks_applicable=data["checks_applicable"],
+            )
+        )
+    db.commit()
+
+
+def _maybe_alert(account: CloudAccount, scan: ScanRun) -> None:
+    """Fire outbound alerts for high/critical findings from this scan."""
+    from cspm.integrations import dispatch_alert, notifiers_configured
+
+    if not notifiers_configured():
+        return
+    # Loaded lazily to avoid a hard import cycle; alert on this run's findings.
+    from cspm.db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        findings = (
+            db.query(FindingRecord)
+            .filter_by(scan_run_id=scan.id)
+            .all()
+        )
+        payload = [
+            {"severity": f.severity, "title": f.description or f.check_id, "resource": f.resource}
+            for f in findings
+        ]
+        if payload:
+            dispatch_alert(f"CSPM scan {account.label or account.provider}", payload)
+    finally:
+        db.close()
 
 
 def run_drift_check(

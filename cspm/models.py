@@ -153,6 +153,22 @@ class Baseline(Base):
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ComplianceSnapshot(Base):
+    """cspm_compliance_snapshots — per-scan framework score, for trend lines."""
+
+    __tablename__ = "cspm_compliance_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(String(36), index=True)
+    cloud_account_id: Mapped[str] = mapped_column(String(36))
+    scan_run_id: Mapped[str | None] = mapped_column(String(36))
+    framework: Mapped[str] = mapped_column(String(50))
+    score: Mapped[float] = mapped_column()
+    checks_passed: Mapped[int] = mapped_column(Integer, default=0)
+    checks_applicable: Mapped[int] = mapped_column(Integer, default=0)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class DriftEvent(Base):
     """cspm_drift_events — a detected configuration change (Module 6.4)."""
 

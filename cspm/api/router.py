@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from cspm.api.pagination import limit_param, offset_param, paginate
@@ -229,6 +230,62 @@ def list_findings(
         q = q.filter_by(cloud_account_id=account_id)
     q = q.order_by(FindingRecord.discovered_at.desc())
     return paginate(q, response, limit, offset)
+
+
+@router.get("/findings/{finding_id}/remediation")
+def finding_remediation(
+    finding_id: str,
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.remediation import remediation_for
+
+    finding = (
+        db.query(FindingRecord).filter_by(id=finding_id, org_id=ctx.org_id).one_or_none()
+    )
+    if finding is None:
+        raise HTTPException(status_code=404, detail="Finding not found.")
+    return {
+        "check_id": finding.check_id,
+        "resource": finding.resource,
+        "guidance": finding.remediation,
+        "snippets": remediation_for(finding.check_id),
+    }
+
+
+@router.get("/reports/findings.csv")
+def export_findings_csv(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.reporting import findings_csv
+
+    return PlainTextResponse(
+        findings_csv(db, ctx.org_id),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=cspm-findings.csv"},
+    )
+
+
+@router.get("/compliance/{framework}/trend")
+def compliance_trend_endpoint(
+    framework: str,
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.reporting import compliance_trend
+
+    return {"framework": framework, "series": compliance_trend(db, ctx.org_id, framework)}
+
+
+@router.get("/audit/verify")
+def verify_audit_chain(
+    ctx: OrgContext = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    from cspm.shared.audit import verify_chain
+
+    return {"org_id": ctx.org_id, "intact": verify_chain(db, ctx.org_id)}
 
 
 @router.patch("/findings/{finding_id}", response_model=FindingOut)

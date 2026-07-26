@@ -157,6 +157,26 @@ is wired in.
 
 ---
 
+## 🏢 Enterprise features
+
+| Area | What's included |
+|------|-----------------|
+| **SSO / Auth** | OIDC/JWT (Okta, Azure AD, Auth0, Cognito) via JWKS or HS256; **API keys** for automation; **SCIM 2.0** user provisioning; DB-backed RBAC from `org_memberships` |
+| **Secrets** | Envelope encryption with pluggable key providers — **AWS KMS**, **HashiCorp Vault**, or env — with key rotation and legacy-ciphertext compatibility |
+| **Tenant isolation** | App-side org scoping **+ Postgres Row-Level Security** so a query bug can't leak cross-tenant data |
+| **Audit integrity** | Immutable, **hash-chained** audit log; `GET /audit/verify` detects any tampering |
+| **Scale** | AWS **Organizations** multi-account fan-out, region auto-discovery, concurrency caps, adaptive throttling backoff |
+| **Breadth** | Native curated checks **+ Prowler adapter** to ingest 1000+ open-source checks |
+| **Integrations** | Slack, generic webhook, PagerDuty alerting (severity-gated) |
+| **Remediation** | Terraform + AWS CLI fix snippets per finding (`GET /findings/{id}/remediation`) |
+| **Scheduling** | Celery Beat: continuous drift sweeps + nightly retention purge |
+| **Reporting** | CSV export + compliance **trend** time series per framework |
+| **Observability** | Prometheus `/metrics`, request tracing, Sentry + OpenTelemetry hooks |
+| **Governance** | Configurable data-retention windows (GDPR/residency), per-client rate limiting |
+| **Deploy** | Helm chart with HPA, non-root hardened containers; CI with ruff, pytest, **Trivy** scan + **SBOM** |
+
+See [`.env.example`](.env.example) for every configuration knob.
+
 ## 🔐 Security model
 
 - **STS AssumeRole with a per-org external id** to prevent the confused-deputy problem.
@@ -251,12 +271,25 @@ def check_my_rule(self) -> list[Finding]:
 
 ## 🗺️ Roadmap
 
+Done in recent iterations:
+
+- [x] OIDC/JWT + API keys + SCIM + DB-backed RBAC
+- [x] KMS/Vault key providers with rotation
+- [x] Postgres RLS tenant isolation + hash-chained audit log
+- [x] AWS region auto-discovery + Organizations multi-account + backoff
+- [x] Prowler adapter for check breadth
+- [x] Slack/webhook/PagerDuty alerting
+- [x] Celery Beat drift schedule + retention purge
+- [x] CSV export + compliance trends
+- [x] Prometheus metrics, rate limiting, Helm/HPA, Trivy + SBOM in CI
+
+Still ahead:
+
 - [ ] Live GCP/Azure collectors (SDK plumbing behind the proven interfaces)
-- [ ] AWS region auto-discovery
-- [ ] PDF/CSV evidence export via the shared reports (Tool 3) pipeline
-- [ ] Celery Beat schedule for the 6-hour drift cadence
-- [ ] Real JWT/SSO auth wired into the `X-Org-Id` / `X-Role` seam
-- [ ] Secrets-manager-backed key management
+- [ ] PDF evidence export via the shared reports (Tool 3) pipeline
+- [ ] Jira/ServiceNow ticketing + Splunk/Sentinel SIEM export
+- [ ] Redis-backed distributed rate limiting
+- [ ] Guarded auto-remediation (one-click apply with approvals)
 
 ---
 

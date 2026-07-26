@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cspm"
-version = "0.3.0"
+version = "0.4.0"
 description = "Tool 6 — Cloud Security Posture Manager (AWS/GCP/Azure) for the Track 2 platform"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,11 +18,15 @@ dependencies = [
     "celery>=5.3",
     "redis>=5.0",
     "boto3>=1.34",
+    "pyjwt[crypto]>=2.8",
+    "requests>=2.31",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4"]
 deploy = ["alembic>=1.13", "psycopg[binary]>=3.1"]
+observability = ["sentry-sdk>=2.0", "opentelemetry-instrumentation-fastapi>=0.46b0"]
 gcp = ["google-auth>=2.0", "google-cloud-storage>=2.0"]
 azure = ["azure-identity>=1.15", "azure-mgmt-resource>=23.0"]
 

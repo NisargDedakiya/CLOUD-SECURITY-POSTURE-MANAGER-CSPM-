@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-worker
+  labels: { app: cspm, component: worker }
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels: { app: cspm, component: worker }
+  template:
+    metadata:
+      labels: { app: cspm, component: worker }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args: ["celery", "-A", "cspm.celery_app.app", "worker", "-Q", "{{ .Values.worker.queues }}", "-l", "info"]
+          envFrom:
+            - secretRef: { name: {{ .Values.existingSecret }} }
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+{{- if .Values.beat.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-beat
+  labels: { app: cspm, component: beat }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: cspm, component: beat }
+  template:
+    metadata:
+      labels: { app: cspm, component: beat }
+    spec:
+      containers:
+        - name: beat
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args: ["celery", "-A", "cspm.celery_app.app", "beat", "-l", "info"]
+          envFrom:
+            - secretRef: { name: {{ .Values.existingSecret }} }
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+{{- end }}

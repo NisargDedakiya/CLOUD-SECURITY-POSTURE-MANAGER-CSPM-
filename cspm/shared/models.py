@@ -43,6 +43,33 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class OrgMembership(Base):
+    """org_memberships — user↔org role binding (shared table, spec 2.2)."""
+
+    __tablename__ = "org_memberships"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), nullable=False, default="viewer")
+
+
+class ApiKey(Base):
+    """API keys for programmatic access. Only the hash is stored."""
+
+    __tablename__ = "cspm_api_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    name: Mapped[str] = mapped_column(String(255))
+    prefix: Mapped[str] = mapped_column(String(12), index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    role: Mapped[str] = mapped_column(String(50), default="analyst")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(default=False)
+
+
 class AuditLogEntry(Base):
     """audit_log — immutable record of user actions (shared table, spec 2.2)."""
 
@@ -56,3 +83,8 @@ class AuditLogEntry(Base):
     meta: Mapped[dict | None] = mapped_column(JSON)
     ip_addr: Mapped[str | None] = mapped_column(String(64))
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # Monotonic per-org ordering (wall-clock ts can tie); drives the hash chain.
+    seq: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    # Tamper-evidence: each entry chains to the previous via SHA-256.
+    prev_hash: Mapped[str | None] = mapped_column(String(64))
+    entry_hash: Mapped[str | None] = mapped_column(String(64))

@@ -34,11 +34,22 @@ class AWSAuditor(BaseAuditor):
     ) -> None:
         self.role_arn = role_arn
         self.external_id = external_id
-        self.regions = regions or DEFAULT_REGIONS
         if session is not None:
             self.session = session
         else:
             self.session = self._assume_role(role_arn, external_id)
+        # Live region discovery when not explicitly provided and not a fake session.
+        self.regions = regions or self._discover_regions()
+
+    def _discover_regions(self) -> list[str]:
+        """Enumerate enabled regions; fall back to a safe default set."""
+        try:
+            ec2 = self.session.client("ec2", region_name="us-east-1")
+            resp = ec2.describe_regions(AllRegions=False)
+            found = [r["RegionName"] for r in resp.get("Regions", [])]
+            return found or DEFAULT_REGIONS
+        except Exception:  # noqa: BLE001 - fakes/limited perms → default set
+            return DEFAULT_REGIONS
 
     @staticmethod
     def _assume_role(role_arn: str | None, external_id: str | None):  # pragma: no cover

@@ -51,3 +51,17 @@ def get_db() -> Iterator[Session]:
         yield db
     finally:
         db.close()
+
+
+def set_org_scope(db: Session, org_id: str) -> None:
+    """Set the Postgres RLS GUC so row-level policies scope to this org.
+
+    No-op on SQLite. Uses a transaction-local setting so it is reset per request.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+
+    db.execute(
+        text("SELECT set_config('app.current_org', :org, true)"), {"org": org_id}
+    )

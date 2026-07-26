@@ -50,6 +50,52 @@ class Settings:
         self.log_level: str = os.getenv("CSPM_LOG_LEVEL", "INFO").upper()
         self.json_logs: bool = _get_bool("CSPM_JSON_LOGS", default=self.is_production)
 
+        # ---- Auth / SSO ----------------------------------------------------
+        # "headers" (dev trust headers), "secret" (HS256 JWT), or "jwks" (OIDC RS256).
+        self.auth_mode: str = os.getenv("CSPM_AUTH_MODE", "headers").lower()
+        self.jwt_secret: str | None = os.getenv("CSPM_JWT_SECRET")
+        self.oidc_jwks_url: str | None = os.getenv("CSPM_OIDC_JWKS_URL")
+        self.oidc_issuer: str | None = os.getenv("CSPM_OIDC_ISSUER")
+        self.oidc_audience: str | None = os.getenv("CSPM_OIDC_AUDIENCE")
+        # Claim names to read org and roles from the token.
+        self.oidc_org_claim: str = os.getenv("CSPM_OIDC_ORG_CLAIM", "org")
+        self.oidc_roles_claim: str = os.getenv("CSPM_OIDC_ROLES_CLAIM", "roles")
+        # SCIM provisioning bearer token (shared secret with the IdP).
+        self.scim_token: str | None = os.getenv("CSPM_SCIM_TOKEN")
+
+        # ---- Secrets management -------------------------------------------
+        # "env" (CSPM_ENCRYPTION_KEY), "aws_kms", or "vault".
+        self.key_provider: str = os.getenv("CSPM_KEY_PROVIDER", "env").lower()
+        self.kms_key_id: str | None = os.getenv("CSPM_KMS_KEY_ID")
+        self.vault_addr: str | None = os.getenv("CSPM_VAULT_ADDR")
+        self.vault_key_path: str | None = os.getenv("CSPM_VAULT_KEY_PATH")
+
+        # ---- Scale / throttling -------------------------------------------
+        self.scan_max_retries: int = int(os.getenv("CSPM_SCAN_MAX_RETRIES", "5"))
+        self.scan_backoff_base: float = float(os.getenv("CSPM_SCAN_BACKOFF_BASE", "1.5"))
+
+        # ---- Rate limiting -------------------------------------------------
+        self.rate_limit_per_min: int = int(os.getenv("CSPM_RATE_LIMIT_PER_MIN", "120"))
+
+        # ---- Retention (data residency / GDPR) ----------------------------
+        self.findings_retention_days: int = int(
+            os.getenv("CSPM_FINDINGS_RETENTION_DAYS", "365")
+        )
+        self.audit_retention_days: int = int(
+            os.getenv("CSPM_AUDIT_RETENTION_DAYS", "730")
+        )
+
+        # ---- Observability -------------------------------------------------
+        self.sentry_dsn: str | None = os.getenv("CSPM_SENTRY_DSN")
+        self.metrics_enabled: bool = _get_bool("CSPM_METRICS_ENABLED", default=True)
+
+        # ---- Integrations --------------------------------------------------
+        self.slack_webhook_url: str | None = os.getenv("CSPM_SLACK_WEBHOOK_URL")
+        self.generic_webhook_url: str | None = os.getenv("CSPM_WEBHOOK_URL")
+        self.pagerduty_routing_key: str | None = os.getenv("CSPM_PAGERDUTY_ROUTING_KEY")
+        # Minimum severity that triggers an outbound alert.
+        self.alert_min_severity: str = os.getenv("CSPM_ALERT_MIN_SEVERITY", "high")
+
         # Pagination bounds.
         self.default_page_size: int = int(os.getenv("CSPM_PAGE_SIZE", "50"))
         self.max_page_size: int = int(os.getenv("CSPM_MAX_PAGE_SIZE", "200"))
@@ -64,12 +110,16 @@ class Settings:
         if not self.is_production:
             return
         problems = []
-        if not self.encryption_key:
-            problems.append("CSPM_ENCRYPTION_KEY is required in production.")
+        if self.key_provider == "env" and not self.encryption_key:
+            problems.append(
+                "CSPM_ENCRYPTION_KEY is required in production (or use CSPM_KEY_PROVIDER)."
+            )
         if self.database_url.startswith("sqlite"):
             problems.append("CSPM_DATABASE_URL must be Postgres in production.")
         if self.eager_tasks:
             problems.append("CSPM_EAGER_TASKS must be false in production.")
+        if self.auth_mode == "headers":
+            problems.append("CSPM_AUTH_MODE must be 'secret' or 'jwks' in production.")
         if problems:
             raise ConfigError(" ".join(problems))
 

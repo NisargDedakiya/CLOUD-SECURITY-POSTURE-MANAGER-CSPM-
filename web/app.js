@@ -1,84 +1,130 @@
-const scanBtn = document.getElementById("scan-btn");
-const summaryEl = document.getElementById("summary");
-const findingsEl = document.getElementById("findings");
-const sevFilter = document.getElementById("sev-filter");
+const API = "/api/v1/cspm";
+const FRAMEWORKS = ["cis_aws_v2", "soc2", "iso27001", "pci_dss_v4"];
 
-let lastResult = null;
+const $ = (id) => document.getElementById(id);
 
-function selectedClouds() {
-  return Array.from(document.querySelectorAll(".cloud-filter:checked")).map((c) => c.value);
+function headers() {
+  return { "Content-Type": "application/json", "X-Org-Id": $("org-id").value.trim() };
 }
 
-async function runScan() {
-  scanBtn.disabled = true;
-  scanBtn.textContent = "Scanning...";
-  findingsEl.innerHTML = "";
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, { headers: headers(), ...opts });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `${res.status} ${res.statusText}`);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.textContent = str == null ? "" : str;
+  return d.innerHTML;
+}
+
+async function connectAccount() {
+  const btn = $("connect-btn");
+  btn.disabled = true;
   try {
-    const params = new URLSearchParams();
-    selectedClouds().forEach((c) => params.append("cloud", c));
-    const res = await fetch(`/api/scan?${params.toString()}`);
-    if (!res.ok) throw new Error(`Scan failed: ${res.status}`);
-    lastResult = await res.json();
-    render();
-  } catch (err) {
-    findingsEl.innerHTML = `<div class="empty">${err.message}</div>`;
+    await api("/accounts", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "aws",
+        label: $("label").value || "aws",
+        role_arn: $("role-arn").value.trim(),
+      }),
+    });
+    $("role-arn").value = "";
+    await refresh();
+  } catch (e) {
+    alert("Connect failed: " + e.message);
   } finally {
-    scanBtn.disabled = false;
-    scanBtn.textContent = "Run Scan";
+    btn.disabled = false;
   }
 }
 
-function card(value, label) {
-  return `<div class="card"><div class="value">${value}</div><div class="label">${label}</div></div>`;
+async function scanAccount(id) {
+  try {
+    await api(`/accounts/${id}/scan`, { method: "POST" });
+    await refresh();
+  } catch (e) {
+    alert("Scan failed: " + e.message);
+  }
 }
 
-function render() {
-  if (!lastResult) return;
-  const s = lastResult.summary;
-  summaryEl.innerHTML = [
-    card(`${s.posture_score}%`, "Posture Score"),
-    card(s.total_findings, "Open Findings"),
-    card(s.resources_scanned, "Resources"),
-    card(s.by_severity.critical, "Critical"),
-    card(s.by_severity.high, "High"),
-    card(s.passed_checks, "Passed Checks"),
-  ].join("");
-  renderFindings();
-}
-
-function renderFindings() {
-  const wanted = sevFilter.value;
-  const failed = lastResult.findings.filter((f) => !f.passed);
-  const filtered = wanted ? failed.filter((f) => f.severity === wanted) : failed;
-
-  if (filtered.length === 0) {
-    findingsEl.innerHTML = `<div class="empty">No findings match. &#127881;</div>`;
+async function renderAccounts() {
+  const accounts = await api("/accounts");
+  if (!accounts.length) {
+    $("accounts").innerHTML = `<p class="empty">No accounts connected yet.</p>`;
     return;
   }
-
-  findingsEl.innerHTML = filtered
+  $("accounts").innerHTML = accounts
     .map(
-      (f) => `
-    <div class="finding ${f.severity}">
-      <div class="top">
-        <span class="badge ${f.severity}">${f.severity}</span>
-        <span class="cloud-tag">${f.cloud}</span>
-        <span class="title">${escapeHtml(f.title)}</span>
-      </div>
-      <div class="res">${escapeHtml(f.resource_type)} &middot; ${escapeHtml(f.resource_id)}</div>
-      <div class="fix"><span>Fix:</span> ${escapeHtml(f.remediation)}</div>
-    </div>`
+      (a) => `<div class="account">
+        <div><strong>${escapeHtml(a.label || a.provider)}</strong>
+          <span class="cloud-tag">${a.provider}</span>
+          <span class="status ${a.status}">${a.status}</span></div>
+        <button data-scan="${a.id}">Run Scan</button>
+      </div>`
+    )
+    .join("");
+  document
+    .querySelectorAll("[data-scan]")
+    .forEach((b) => b.addEventListener("click", () => scanAccount(b.dataset.scan)));
+}
+
+async function renderCompliance() {
+  const cards = await Promise.all(
+    FRAMEWORKS.map(async (fw) => {
+      try {
+        const d = await api(`/compliance/${fw}`);
+        const cls = d.score >= 80 ? "good" : d.score >= 50 ? "warn" : "bad";
+        return `<div class="card"><div class="value ${cls}">${d.score}%</div>
+          <div class="label">${fw}</div>
+          <div class="sub">${d.checks_passed}/${d.checks_applicable} controls</div></div>`;
+      } catch {
+        return `<div class="card"><div class="value">–</div><div class="label">${fw}</div></div>`;
+      }
+    })
+  );
+  $("compliance").innerHTML = cards.join("");
+}
+
+async function renderFindings() {
+  const sev = $("sev-filter").value;
+  const findings = await api("/findings" + (sev ? `?severity=${sev}` : ""));
+  if (!findings.length) {
+    $("findings").innerHTML = `<p class="empty">No findings. &#127881;</p>`;
+    return;
+  }
+  $("findings").innerHTML = findings
+    .map(
+      (f) => `<div class="finding ${f.severity}">
+        <div class="top">
+          <span class="badge ${f.severity}">${f.severity}</span>
+          <span class="title">${escapeHtml(f.description || f.check_id)}</span>
+          <span class="fstatus">${f.status}</span>
+        </div>
+        <div class="res">${escapeHtml(f.resource)}</div>
+        <div class="fix"><span>Fix:</span> ${escapeHtml(f.remediation)}</div>
+      </div>`
     )
     .join("");
 }
 
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+async function refresh() {
+  try {
+    await renderAccounts();
+    await renderCompliance();
+    await renderFindings();
+  } catch (e) {
+    $("findings").innerHTML = `<p class="empty">${escapeHtml(e.message)}</p>`;
+  }
 }
 
-scanBtn.addEventListener("click", runScan);
-sevFilter.addEventListener("change", renderFindings);
+$("connect-btn").addEventListener("click", connectAccount);
+$("refresh-btn").addEventListener("click", refresh);
+$("sev-filter").addEventListener("change", renderFindings);
+$("org-id").addEventListener("change", refresh);
 
-runScan();
+refresh();

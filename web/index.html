@@ -3,22 +3,39 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cloud Security Posture Manager</title>
+  <title>CSPM — Cloud Security Posture Manager</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header>
-    <h1>&#128737; Cloud Security Posture Manager</h1>
+    <h1>&#128737; Cloud Security Posture Manager <span class="tool">Tool 6</span></h1>
     <div class="controls">
-      <label><input type="checkbox" class="cloud-filter" value="aws" checked /> AWS</label>
-      <label><input type="checkbox" class="cloud-filter" value="gcp" checked /> GCP</label>
-      <label><input type="checkbox" class="cloud-filter" value="azure" checked /> Azure</label>
-      <button id="scan-btn">Run Scan</button>
+      <label>Org <input id="org-id" value="demo-org" /></label>
+      <button id="refresh-btn">Refresh</button>
     </div>
   </header>
 
   <main>
-    <section id="summary" class="cards" aria-live="polite"></section>
+    <section class="connect">
+      <h2>Connect an AWS account</h2>
+      <div class="row">
+        <input id="label" placeholder="Label (e.g. prod)" />
+        <input id="role-arn" placeholder="Role ARN (arn:aws:iam::...:role/audit)" />
+        <button id="connect-btn">Connect &amp; Validate</button>
+      </div>
+      <p class="hint">Live validation calls STS. For a no-credential walkthrough, run
+        <code>cspm --demo</code> in the CLI.</p>
+    </section>
+
+    <section id="accounts-section">
+      <h2>Connected accounts</h2>
+      <div id="accounts"></div>
+    </section>
+
+    <section id="compliance-section">
+      <h2>Compliance</h2>
+      <div id="compliance" class="cards"></div>
+    </section>
 
     <section class="findings-section">
       <div class="findings-header">

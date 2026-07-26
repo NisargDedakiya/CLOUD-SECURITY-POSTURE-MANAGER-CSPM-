@@ -1,16 +1,37 @@
-"""Core data models shared across providers, checks, and the engine."""
+"""CSPM ORM models — mirrors the DB schema in spec Section 4.
+
+Portable across Postgres and SQLite: UUIDs are stored as strings and JSONB as
+the SQLAlchemy ``JSON`` type (which maps to JSONB on Postgres).
+"""
 
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field, asdict
+import uuid
 from datetime import datetime, timezone
-from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from cspm.db import Base
 
 
-class Severity(enum.Enum):
-    """Ordered severity levels for findings."""
+def _uuid() -> str:
+    return str(uuid.uuid4())
 
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Severity(str, enum.Enum):
     INFO = "info"
     LOW = "low"
     MEDIUM = "medium"
@@ -19,120 +40,133 @@ class Severity(enum.Enum):
 
     @property
     def rank(self) -> int:
-        order = [
-            Severity.INFO,
-            Severity.LOW,
-            Severity.MEDIUM,
-            Severity.HIGH,
-            Severity.CRITICAL,
-        ]
-        return order.index(self)
-
-    def __lt__(self, other: "Severity") -> bool:
-        if not isinstance(other, Severity):
-            return NotImplemented
-        return self.rank < other.rank
+        return ["info", "low", "medium", "high", "critical"].index(self.value)
 
 
-class Cloud(enum.Enum):
+class Provider(str, enum.Enum):
     AWS = "aws"
     GCP = "gcp"
     AZURE = "azure"
 
 
-@dataclass
-class Resource:
-    """A normalized cloud resource that checks evaluate.
+class CloudAccount(Base):
+    """cspm_cloud_accounts — a connected AWS/GCP/Azure account (Module 6.1)."""
 
-    ``properties`` holds the provider-specific attributes in a normalized shape
-    so checks can be written against a stable structure.
-    """
+    __tablename__ = "cspm_cloud_accounts"
 
-    id: str
-    name: str
-    type: str
-    cloud: Cloud
-    region: str = "global"
-    properties: dict[str, Any] = field(default_factory=dict)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organisations.id", ondelete="CASCADE")
+    )
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(255))
 
-    def to_dict(self) -> dict[str, Any]:
-        data = asdict(self)
-        data["cloud"] = self.cloud.value
-        return data
+    # AWS
+    role_arn: Mapped[str | None] = mapped_column(Text)
+    external_id: Mapped[str | None] = mapped_column(String(100))
+    # GCP (AES-256 encrypted service-account JSON)
+    gcp_sa_key_enc: Mapped[str | None] = mapped_column(Text)
+    # Azure
+    azure_tenant_id: Mapped[str | None] = mapped_column(String(100))
+    azure_client_id: Mapped[str | None] = mapped_column(String(100))
+    azure_secret_enc: Mapped[str | None] = mapped_column(Text)
 
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
-@dataclass
-class Finding:
-    """The result of a failed (or informational) check against a resource."""
-
-    check_id: str
-    title: str
-    severity: Severity
-    cloud: Cloud
-    resource_id: str
-    resource_type: str
-    region: str
-    description: str
-    remediation: str
-    passed: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "check_id": self.check_id,
-            "title": self.title,
-            "severity": self.severity.value,
-            "cloud": self.cloud.value,
-            "resource_id": self.resource_id,
-            "resource_type": self.resource_type,
-            "region": self.region,
-            "description": self.description,
-            "remediation": self.remediation,
-            "passed": self.passed,
-        }
+    scan_runs: Mapped[list["ScanRun"]] = relationship(
+        back_populates="cloud_account", cascade="all, delete-orphan"
+    )
 
 
-@dataclass
-class ScanResult:
-    """Aggregated output of a scan run."""
+class ScanRun(Base):
+    """cspm_scan_runs — one audit execution against a cloud account."""
 
-    findings: list[Finding] = field(default_factory=list)
-    resources_scanned: int = 0
-    checks_run: int = 0
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime | None = None
+    __tablename__ = "cspm_scan_runs"
 
-    @property
-    def failed(self) -> list[Finding]:
-        return [f for f in self.findings if not f.passed]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    cloud_account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("cspm_cloud_accounts.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    checks_run: Mapped[int] = mapped_column(Integer, default=0)
+    findings_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    @property
-    def passed(self) -> list[Finding]:
-        return [f for f in self.findings if f.passed]
+    cloud_account: Mapped[CloudAccount] = relationship(back_populates="scan_runs")
+    findings: Mapped[list["FindingRecord"]] = relationship(
+        back_populates="scan_run", cascade="all, delete-orphan"
+    )
 
-    def summary(self) -> dict[str, Any]:
-        counts: dict[str, int] = {s.value: 0 for s in Severity}
-        for f in self.failed:
-            counts[f.severity.value] += 1
-        by_cloud: dict[str, int] = {}
-        for f in self.failed:
-            by_cloud[f.cloud.value] = by_cloud.get(f.cloud.value, 0) + 1
-        total_checks = len(self.findings)
-        passed = len(self.passed)
-        score = round((passed / total_checks) * 100, 1) if total_checks else 100.0
-        return {
-            "resources_scanned": self.resources_scanned,
-            "checks_run": self.checks_run,
-            "total_findings": len(self.failed),
-            "passed_checks": passed,
-            "posture_score": score,
-            "by_severity": counts,
-            "by_cloud": by_cloud,
-        }
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "summary": self.summary(),
-            "started_at": self.started_at.isoformat(),
-            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
-            "findings": [f.to_dict() for f in self.findings],
-        }
+class FindingRecord(Base):
+    """cspm_findings — a single misconfiguration finding."""
+
+    __tablename__ = "cspm_findings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organisations.id"))
+    cloud_account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("cspm_cloud_accounts.id")
+    )
+    scan_run_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("cspm_scan_runs.id"), nullable=True
+    )
+    check_id: Mapped[str] = mapped_column(String(100))
+    resource: Mapped[str | None] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String(20))
+    description: Mapped[str | None] = mapped_column(Text)
+    remediation: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="open")
+    dedup_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    scan_run: Mapped[ScanRun] = relationship(back_populates="findings")
+
+
+class ComplianceMapping(Base):
+    """compliance_mappings — static seed: check_id → framework → control_id."""
+
+    __tablename__ = "compliance_mappings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    check_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    framework: Mapped[str] = mapped_column(String(50), nullable=False)
+    control_id: Mapped[str] = mapped_column(String(50), nullable=False)
+
+
+class Baseline(Base):
+    """cspm_baselines — approved config snapshot per resource (Module 6.4)."""
+
+    __tablename__ = "cspm_baselines"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    cloud_account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("cspm_cloud_accounts.id", ondelete="CASCADE")
+    )
+    resource_type: Mapped[str | None] = mapped_column(String(100))
+    resource_id: Mapped[str | None] = mapped_column(Text)
+    config_snapshot: Mapped[dict] = mapped_column(JSON)
+    approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DriftEvent(Base):
+    """cspm_drift_events — a detected configuration change (Module 6.4)."""
+
+    __tablename__ = "cspm_drift_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(String(36), ForeignKey("organisations.id"))
+    cloud_account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("cspm_cloud_accounts.id")
+    )
+    resource_type: Mapped[str | None] = mapped_column(String(100))
+    resource_id: Mapped[str | None] = mapped_column(Text)
+    drift_type: Mapped[str] = mapped_column(String(30))
+    before_state: Mapped[dict | None] = mapped_column(JSON)
+    after_state: Mapped[dict | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(20), default="pending_review")
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

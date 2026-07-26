@@ -123,3 +123,32 @@ select {
 .finding .fix span { color: var(--pass); font-weight: 600; }
 
 .empty { color: var(--muted); text-align: center; padding: 3rem; }
+
+h1 .tool {
+  font-size: 0.7rem; background: var(--accent); color: white;
+  padding: 0.1rem 0.45rem; border-radius: 4px; vertical-align: middle;
+}
+section { margin-bottom: 2rem; }
+section h2 { font-size: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.connect .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+input {
+  background: var(--panel-2); color: var(--text); border: 1px solid #2b3550;
+  padding: 0.5rem 0.6rem; border-radius: 6px; min-width: 160px;
+}
+#role-arn { flex: 1; min-width: 300px; }
+.hint { color: var(--muted); font-size: 0.82rem; }
+.hint code { background: var(--panel-2); padding: 0.1rem 0.35rem; border-radius: 4px; }
+.account {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--panel); border: 1px solid #2b3550; border-radius: 8px;
+  padding: 0.7rem 1rem; margin-bottom: 0.5rem;
+}
+.status { font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 4px; margin-left: 0.4rem; }
+.status.active { background: var(--pass); color: #0f1420; }
+.status.pending, .status.error { background: var(--medium); color: #0f1420; }
+.card .value.good { color: var(--pass); }
+.card .value.warn { color: var(--medium); }
+.card .value.bad { color: var(--high); }
+.card .sub { color: var(--muted); font-size: 0.75rem; margin-top: 0.2rem; }
+.fstatus { margin-left: auto; font-size: 0.72rem; color: var(--muted); }
+.finding .top { display: flex; align-items: center; gap: 0.6rem; }

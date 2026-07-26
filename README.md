@@ -1,98 +1,107 @@
-# Cloud Security Posture Manager (CSPM)
+# Tool 6 — Cloud Security Posture Manager (CSPM)
 
-A multi-cloud (**AWS**, **GCP**, **Azure**) security posture scanner. It collects
-normalized cloud resources, runs a set of Python-coded security checks against
-them, and reports misconfigurations with severity and remediation guidance —
-via a REST API, a web dashboard, and a CLI.
+Continuously audits a customer's **AWS, GCP, and Azure** accounts against CIS
+Benchmarks and security best practices, finding misconfigurations before
+attackers exploit them. Read-only and non-intrusive — it never modifies customer
+cloud resources.
 
-Out of the box it runs in **mock mode** with realistic sample resources, so you
-can try the whole pipeline without any cloud credentials.
+Built to the Track 2 SaaS platform spec: CSPM is **not standalone**, it mounts as
+a router at `/api/v1/cspm/` on the shared FastAPI backend (auth, orgs, billing,
+audit log, reports). The shared foundation is represented here by lightweight,
+swappable stubs in `cspm/shared/`.
+
+## Modules (spec build order)
+
+| # | Module | Package | What it does |
+|---|--------|---------|--------------|
+| 6.1 | Cloud Account Connector | `cspm/connectors/` | Connect AWS (STS AssumeRole + external id), GCP (SA key), Azure (SP) with least-privilege, read-only creds. Validates then stores secrets AES-256 encrypted. |
+| 6.2 | AWS Security Audit Engine | `cspm/auditors/` | `AWSAuditor` class with independently-testable `check_*` methods (IAM, S3, EC2/VPC, RDS, CloudTrail, KMS, GuardDuty). |
+| 6.3 | Compliance Mapping Engine | `cspm/compliance/` | Maps checks → CIS AWS v2 / SOC 2 / ISO 27001 / PCI DSS v4 controls; per-framework score; evidence export; remediation priority. |
+| 6.4 | Drift Detection | `cspm/drift/` | Baseline snapshot (JSONB) + `deepdiff` structural comparison; approval workflow; security-sensitive changes flagged. |
 
 ## Architecture
 
 ```
 cspm/
-  models.py          Resource, Finding, Severity, ScanResult
-  checks/            Python-coded checks (one class per check, auto-registered)
-    base.py            Check base class + registry
-    aws_checks.py      GCP/Azure equivalents alongside
-  providers/         Resource collectors per cloud (mock + live stubs)
-  engine.py          ScanEngine: collect resources -> run applicable checks
-  api/app.py         FastAPI REST API + dashboard host
-  cli.py             Command-line scanner
-web/                 Static dashboard (HTML/CSS/JS)
-tests/               pytest unit + integration tests
+  config.py         env-driven settings
+  db.py             SQLAlchemy engine/session/Base
+  models.py         ORM for cspm_* tables (spec Section 4)
+  schemas.py        Pydantic request/response (secrets never serialized)
+  security/crypto.py AES-256-GCM field encryption
+  shared/           stubs for the shared platform (orgs, users, auth deps)
+  connectors/       Module 6.1
+  auditors/         Module 6.2  (+ Finding value object)
+  compliance/       Module 6.3  (mappings seed + scoring/evidence)
+  drift/            Module 6.4  (deepdiff detector)
+  service.py        orchestration shared by API + Celery
+  celery_app.py     shared Celery app (4 queues) reference
+  tasks.py          run_aws_audit (high queue), run_drift_check (default)
+  api/router.py     /api/v1/cspm/ endpoints (spec Section 6)
+  api/app.py        standalone FastAPI app + dashboard
+  cli.py            AWS audit CLI (--demo for no-credential run)
+  fakes.py          in-memory fake AWS session for demos/tests
+web/                dashboard
+migrations/         001_cspm_schema.sql (Postgres)
+tests/              39 tests
 ```
 
-**Flow:** a `Provider` collects `Resource` objects → the `ScanEngine` matches
-each resource to applicable `Check`s → each check returns a `Finding`
-(pass/fail with severity + remediation) → results are aggregated into a
-`ScanResult` with a posture score.
-
-## Quick start
+## Quick start (no cloud credentials)
 
 ```bash
 pip install -e ".[dev]"
 
-# CLI scan (mock data)
-cspm --format table                 # all clouds
-cspm --cloud aws --cloud gcp        # subset
-cspm --format json                  # machine-readable
-cspm --fail-on high                 # non-zero exit for CI gating
+# CLI: full audit against an in-memory fake AWS account
+cspm --demo                 # table with findings + compliance scores
+cspm --demo --format json
 
-# Web dashboard + API
+# API + dashboard
 uvicorn cspm.api.app:app --reload
-# open http://127.0.0.1:8000
+#   open http://127.0.0.1:8000  (set an Org id, connect an account, scan)
 ```
 
-## API endpoints
+Every API request is org-scoped via the `X-Org-Id` header (the seam where the
+shared JWT/RBAC auth is wired in).
 
-| Method | Path           | Description                                  |
-|--------|----------------|----------------------------------------------|
-| GET    | `/api/health`  | Health/version                               |
-| GET    | `/api/checks`  | List all registered checks                   |
-| GET    | `/api/scan`    | Run a scan. Query: `cloud=aws&live=false`    |
-| GET    | `/`            | Web dashboard                                |
+## API surface (`/api/v1/cspm/`)
 
-## Built-in checks
-
-**AWS:** S3 public access, S3 encryption, security-group open SSH, IAM user MFA,
-RDS encryption.
-**GCP:** public storage bucket, uniform bucket-level access, firewall open RDP,
-instance public IP, service-account key rotation.
-**Azure:** storage HTTPS-only, public blob access, NSG open management ports,
-SQL auditing, VM disk encryption.
-
-## Adding a check
-
-Subclass `Check`, set the class attributes, and implement `evaluate` (return
-`True` when compliant). Registration is automatic on import.
-
-```python
-from cspm.checks.base import Check
-from cspm.models import Cloud, Resource, Severity
-
-class MyCheck(Check):
-    check_id = "AWS_MY_CHECK"
-    title = "..."
-    cloud = Cloud.AWS
-    resource_type = "s3_bucket"
-    severity = Severity.HIGH
-    description = "..."
-    remediation = "..."
-
-    def evaluate(self, resource: Resource) -> bool:
-        return resource.properties.get("something") is True
+```
+POST   /accounts                        Connect a cloud account
+GET    /accounts                        List connected accounts
+POST   /accounts/{id}/validate          Re-validate credentials
+DELETE /accounts/{id}                   Disconnect
+POST   /accounts/{id}/scan              Trigger an audit
+GET    /scans/{scan_run_id}             Scan run status
+GET    /findings                        List findings (severity/status/account)
+PATCH  /findings/{id}                   Update finding status
+GET    /compliance/{framework}          Compliance score + detail
+GET    /compliance/{framework}/evidence Evidence export
+GET    /drift                           List drift events
+POST   /drift/{id}/approve              Approve drift (updates baseline)
+POST   /drift/{id}/reject               Mark as violation (creates finding)
 ```
 
-## Going live
+## Security notes (per spec 6.1)
 
-Each provider ships a `_collect_live()` stub. Implement it with the relevant
-cloud SDK (boto3 / google-cloud / azure-mgmt) to normalize real resources into
-`Resource` objects, then run with `--live` (CLI) or `?live=true` (API).
+- AWS uses **STS AssumeRole with an external id** (per-org secret) to prevent the
+  confused-deputy problem.
+- Cloud secrets (AWS secret keys, GCP SA JSON, Azure client secrets) are
+  **AES-256-GCM encrypted** at rest and **never returned to the frontend** —
+  `CloudAccountOut` has no secret fields.
+- Validation runs the cheapest read-only call per provider
+  (`sts.get_caller_identity()` for AWS).
+
+## Production wiring
+
+- **DB**: set `CSPM_DATABASE_URL` to Postgres; apply `migrations/001_cspm_schema.sql`
+  (or Alembic). Defaults to in-memory SQLite for dev/tests.
+- **Encryption**: set `CSPM_ENCRYPTION_KEY` (`python -c "from cspm.security.crypto import generate_key; print(generate_key())"`).
+- **Tasks**: audits enqueue on the shared `high` queue, drift on `default`;
+  security-sensitive drift re-routes an alert to `critical`.
+- **Live cloud**: install extras `pip install -e ".[gcp,azure]"`; AWS uses boto3
+  (bundled). Auditors accept an injected session for testing.
 
 ## Tests
 
 ```bash
-pytest -q
+pytest -q      # 39 tests: crypto, connectors, auditor, compliance, drift, service, API
 ```

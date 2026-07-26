@@ -26,6 +26,7 @@ class AzureConnectRequest(BaseModel):
     tenant_id: str
     client_id: str
     client_secret: str
+    subscription_id: str
 
 
 class CloudAccountOut(BaseModel):

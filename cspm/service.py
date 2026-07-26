@@ -55,6 +55,7 @@ def build_auditor(account: CloudAccount, session=None) -> BaseAuditor:
             tenant_id=account.azure_tenant_id,
             client_id=account.azure_client_id,
             client_secret=secret,
+            subscription_id=account.azure_subscription_id,
             collector=session,
         )
     raise NotImplementedError(f"Unsupported provider '{account.provider}'.")

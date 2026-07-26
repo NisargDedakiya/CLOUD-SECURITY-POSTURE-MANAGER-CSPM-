@@ -84,6 +84,7 @@ def connect_account(
                 tenant_id=req.tenant_id,
                 client_id=req.client_id,
                 client_secret=req.client_secret,
+                subscription_id=req.subscription_id,
             )
         else:
             raise HTTPException(status_code=400, detail="Unsupported provider.")

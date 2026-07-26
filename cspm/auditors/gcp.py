@@ -7,6 +7,8 @@ authenticated from the stored service-account key.
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from cspm.auditors.base import BaseAuditor
 from cspm.auditors.findings import Finding
 
@@ -111,24 +113,116 @@ class GCPAuditor(BaseAuditor):
 
 
 class _LiveGCPCollector:  # pragma: no cover - requires google-cloud + creds
+    """Live GCP collector backed by google-cloud-storage + the discovery API.
+
+    Install with ``pip install -e ".[gcp]"``. Credentials are built from the
+    connected service-account JSON; only read-only scopes are requested.
+    """
+
+    _SCOPES = ["https://www.googleapis.com/auth/cloud-platform.read-only"]
+
     def __init__(self, service_account_json: str | None) -> None:
         if not service_account_json:
             raise ValueError("service_account_json required for live GCP auditing.")
-        self.service_account_json = service_account_json
+        import json
 
-    def _not_impl(self):
-        raise NotImplementedError(
-            "Live GCP collection requires google-cloud client libraries."
+        from google.oauth2 import service_account
+
+        self._info = json.loads(service_account_json)
+        self.project = self._info["project_id"]
+        self._creds = service_account.Credentials.from_service_account_info(
+            self._info, scopes=self._SCOPES
         )
 
-    def buckets(self):
-        self._not_impl()
+    def _compute(self):
+        from googleapiclient.discovery import build
 
-    def firewalls(self):
-        self._not_impl()
+        return build("compute", "v1", credentials=self._creds, cache_discovery=False)
 
-    def instances(self):
-        self._not_impl()
+    def _iam(self):
+        from googleapiclient.discovery import build
 
-    def service_accounts(self):
-        self._not_impl()
+        return build("iam", "v1", credentials=self._creds, cache_discovery=False)
+
+    def buckets(self) -> list[dict]:
+        from google.cloud import storage
+
+        client = storage.Client(project=self.project, credentials=self._creds)
+        out = []
+        for bucket in client.list_buckets():
+            policy = bucket.get_iam_policy(requested_policy_version=3)
+            members: set[str] = set()
+            for binding in policy.bindings:
+                members |= set(binding.get("members", []))
+            ubla = bool(
+                getattr(bucket.iam_configuration, "uniform_bucket_level_access_enabled", False)
+            )
+            out.append(
+                {"name": bucket.name, "iam_members": list(members), "uniform_bucket_level_access": ubla}
+            )
+        return out
+
+    def firewalls(self) -> list[dict]:
+        svc = self._compute()
+        out = []
+        req = svc.firewalls().list(project=self.project)
+        while req is not None:
+            resp = req.execute()
+            for fw in resp.get("items", []):
+                out.append(
+                    {
+                        "name": fw["name"],
+                        "direction": fw.get("direction", "INGRESS"),
+                        "source_ranges": fw.get("sourceRanges", []),
+                        "allowed": fw.get("allowed", []),
+                    }
+                )
+            req = svc.firewalls().list_next(req, resp)
+        return out
+
+    def instances(self) -> list[dict]:
+        svc = self._compute()
+        out = []
+        req = svc.instances().aggregatedList(project=self.project)
+        while req is not None:
+            resp = req.execute()
+            for _zone, scoped in resp.get("items", {}).items():
+                for inst in scoped.get("instances", []):
+                    has_public = any(
+                        ac.get("natIP")
+                        for nic in inst.get("networkInterfaces", [])
+                        for ac in nic.get("accessConfigs", [])
+                    )
+                    out.append({"name": inst["name"], "has_public_ip": has_public})
+            req = svc.instances().aggregatedList_next(req, resp)
+        return out
+
+    def service_accounts(self) -> list[dict]:
+        from datetime import datetime
+
+        iam = self._iam()
+        out = []
+        resp = (
+            iam.projects()
+            .serviceAccounts()
+            .list(name=f"projects/{self.project}")
+            .execute()
+        )
+        for sa in resp.get("accounts", []):
+            keys_resp = (
+                iam.projects()
+                .serviceAccounts()
+                .keys()
+                .list(name=sa["name"], keyTypes="USER_MANAGED")
+                .execute()
+            )
+            keys = []
+            for k in keys_resp.get("keys", []):
+                valid = k.get("validAfterTime")
+                age = 0
+                if valid:
+                    created = datetime.fromisoformat(valid.replace("Z", "+00:00"))
+                    age = (datetime.now(UTC) - created).days
+                keys.append({"age_days": age})
+            out.append({"email": sa["email"], "keys": keys})
+        return out

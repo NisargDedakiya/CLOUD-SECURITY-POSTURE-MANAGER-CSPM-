@@ -71,6 +71,19 @@ def test_azure_connector_encrypts_secret():
     assert decrypt(result.stored_fields["azure_secret_enc"]) == "shh"
 
 
+def test_azure_connector_stores_subscription_id():
+    conn = get_connector(
+        "azure",
+        tenant_id="t1",
+        client_id="c1",
+        client_secret="shh",
+        subscription_id="sub-123",
+        validator=lambda t, c, s: None,
+    )
+    result = conn.validate()
+    assert result.stored_fields["azure_subscription_id"] == "sub-123"
+
+
 def test_unsupported_provider():
     with pytest.raises(ConnectorError):
         get_connector("oracle")

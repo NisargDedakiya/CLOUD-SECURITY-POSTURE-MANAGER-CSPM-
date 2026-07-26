@@ -70,6 +70,7 @@ class CloudAccount(Base):
     azure_tenant_id: Mapped[str | None] = mapped_column(String(100))
     azure_client_id: Mapped[str | None] = mapped_column(String(100))
     azure_secret_enc: Mapped[str | None] = mapped_column(Text)
+    azure_subscription_id: Mapped[str | None] = mapped_column(String(100))
 
     status: Mapped[str] = mapped_column(String(20), default="pending")
     last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

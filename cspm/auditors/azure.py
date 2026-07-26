@@ -19,10 +19,11 @@ class AzureAuditor(BaseAuditor):
         tenant_id: str | None = None,
         client_id: str | None = None,
         client_secret: str | None = None,
+        subscription_id: str | None = None,
         collector=None,
     ) -> None:
         self.collector = collector or _LiveAzureCollector(
-            tenant_id, client_id, client_secret
+            tenant_id, client_id, client_secret, subscription_id
         )
 
     def check_storage_https_only(self) -> list[Finding]:
@@ -120,24 +121,76 @@ class AzureAuditor(BaseAuditor):
 
 
 class _LiveAzureCollector:  # pragma: no cover - requires azure-mgmt + creds
-    def __init__(self, tenant_id, client_id, client_secret) -> None:
-        if not all([tenant_id, client_id, client_secret]):
-            raise ValueError("Azure service-principal credentials required.")
-        self.tenant_id = tenant_id
-        self.client_id = client_id
-        self.client_secret = client_secret
+    """Live Azure collector backed by the azure-mgmt SDKs.
 
-    def _not_impl(self):
-        raise NotImplementedError("Live Azure collection requires azure-mgmt SDKs.")
+    Install with ``pip install -e ".[azure]"``. Authenticates a service principal
+    (Reader on the subscription) via azure-identity.
+    """
 
-    def storage_accounts(self):
-        self._not_impl()
+    def __init__(self, tenant_id, client_id, client_secret, subscription_id) -> None:
+        if not all([tenant_id, client_id, client_secret, subscription_id]):
+            raise ValueError("Azure credentials + subscription_id required.")
+        from azure.identity import ClientSecretCredential
 
-    def network_security_groups(self):
-        self._not_impl()
+        self.subscription_id = subscription_id
+        self._cred = ClientSecretCredential(tenant_id, client_id, client_secret)
 
-    def sql_servers(self):
-        self._not_impl()
+    def storage_accounts(self) -> list[dict]:
+        from azure.mgmt.storage import StorageManagementClient
 
-    def virtual_machines(self):
-        self._not_impl()
+        client = StorageManagementClient(self._cred, self.subscription_id)
+        out = []
+        for sa in client.storage_accounts.list():
+            out.append(
+                {
+                    "name": sa.name,
+                    "https_only": bool(getattr(sa, "enable_https_traffic_only", False)),
+                    "allow_blob_public_access": bool(
+                        getattr(sa, "allow_blob_public_access", False)
+                    ),
+                }
+            )
+        return out
+
+    def network_security_groups(self) -> list[dict]:
+        from azure.mgmt.network import NetworkManagementClient
+
+        client = NetworkManagementClient(self._cred, self.subscription_id)
+        out = []
+        for nsg in client.network_security_groups.list_all():
+            rules = [
+                {
+                    "direction": r.direction,
+                    "access": r.access,
+                    "source_address_prefix": r.source_address_prefix or "",
+                    "destination_port_range": r.destination_port_range or "",
+                }
+                for r in (nsg.security_rules or [])
+            ]
+            out.append({"name": nsg.name, "security_rules": rules})
+        return out
+
+    def sql_servers(self) -> list[dict]:
+        from azure.mgmt.sql import SqlManagementClient
+
+        client = SqlManagementClient(self._cred, self.subscription_id)
+        out = []
+        for srv in client.servers.list():
+            rg = srv.id.split("/")[4]
+            auditing = client.server_blob_auditing_policies.get(rg, srv.name)
+            out.append(
+                {"name": srv.name, "auditing_enabled": auditing.state == "Enabled"}
+            )
+        return out
+
+    def virtual_machines(self) -> list[dict]:
+        from azure.mgmt.compute import ComputeManagementClient
+
+        client = ComputeManagementClient(self._cred, self.subscription_id)
+        out = []
+        for vm in client.virtual_machines.list_all():
+            encrypted = bool(
+                getattr(getattr(vm, "security_profile", None), "encryption_at_host", False)
+            )
+            out.append({"name": vm.name, "disk_encryption_enabled": encrypted})
+        return out

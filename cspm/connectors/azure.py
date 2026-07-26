@@ -14,6 +14,7 @@ class AzureConnector(BaseConnector):
         tenant_id: str,
         client_id: str,
         client_secret: str,
+        subscription_id: str | None = None,
         validator=None,
     ) -> None:
         if not all([tenant_id, client_id, client_secret]):
@@ -21,6 +22,7 @@ class AzureConnector(BaseConnector):
         self.tenant_id = tenant_id
         self.client_id = client_id
         self.client_secret = client_secret
+        self.subscription_id = subscription_id
         self._validator = validator
 
     def validate(self) -> ValidationResult:
@@ -42,6 +44,7 @@ class AzureConnector(BaseConnector):
                 "azure_tenant_id": self.tenant_id,
                 "azure_client_id": self.client_id,
                 "azure_secret_enc": encrypt(self.client_secret),
+                **({"azure_subscription_id": self.subscription_id} if self.subscription_id else {}),
             },
         )
 

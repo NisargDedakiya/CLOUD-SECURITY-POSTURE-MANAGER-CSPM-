@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Aegis CSPM — org-wide read-only audit role, deployed as a CloudFormation
+  StackSet to every member account in an AWS Organization. Deploy from the
+  management (or delegated admin) account with SERVICE_MANAGED permissions so new
+  accounts are enrolled automatically. Aegis then discovers accounts via
+  organizations:ListAccounts and assumes AegisCSPMAuditRole in each.
+
+Parameters:
+  AegisAccountId:
+    Type: String
+    AllowedPattern: "^[0-9]{12}$"
+    Description: Aegis platform AWS account ID allowed to assume the role.
+  ExternalId:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Per-organisation External ID from Aegis.
+  RoleName:
+    Type: String
+    Default: AegisCSPMAuditRole
+
+Resources:
+  AegisAuditRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: Read-only role assumed by Aegis CSPM (org-wide via StackSet).
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AegisAccountId}:root"
+            Action: "sts:AssumeRole"
+            Condition:
+              StringEquals:
+                "sts:ExternalId": !Ref ExternalId
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/SecurityAudit"
+        - "arn:aws:iam::aws:policy/job-function/ViewOnlyAccess"
+      Tags:
+        - Key: managed-by
+          Value: aegis-cspm
+
+Outputs:
+  RoleArn:
+    Value: !GetAtt AegisAuditRole.Arn

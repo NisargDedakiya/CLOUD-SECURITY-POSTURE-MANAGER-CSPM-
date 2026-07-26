@@ -45,6 +45,18 @@ class Settings:
         )
         self.audit_concurrency: int = int(os.getenv("CSPM_AUDIT_CONCURRENCY", "8"))
         self.drift_interval_hours: int = int(os.getenv("CSPM_DRIFT_INTERVAL_HOURS", "6"))
+        # Onboarding: the Aegis platform AWS account customers trust, and where the
+        # CloudFormation template is hosted (for the one-click Launch Stack link).
+        self.aws_platform_account_id: str = os.getenv(
+            "CSPM_AWS_PLATFORM_ACCOUNT_ID", "000000000000"
+        )
+        self.onboarding_template_url: str = os.getenv(
+            "CSPM_ONBOARDING_TEMPLATE_URL",
+            "https://example-bucket.s3.amazonaws.com/aegis/aws-role.yaml",
+        )
+        self.onboarding_role_name: str = os.getenv(
+            "CSPM_ONBOARDING_ROLE_NAME", "AegisCSPMAuditRole"
+        )
 
         # Logging.
         self.log_level: str = os.getenv("CSPM_LOG_LEVEL", "INFO").upper()

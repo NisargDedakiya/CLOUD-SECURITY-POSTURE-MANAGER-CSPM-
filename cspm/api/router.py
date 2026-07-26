@@ -66,6 +66,38 @@ def _account_or_404(db: Session, ctx: OrgContext, account_id: str) -> CloudAccou
 
 
 # ---- Module 6.1: accounts --------------------------------------------------
+@router.post("/accounts/aws/prepare")
+def prepare_aws_connection(
+    ctx: OrgContext = Depends(WRITE),
+    db: Session = Depends(get_db),
+):
+    """Mint the External ID + one-click Launch Stack URL for AWS onboarding.
+
+    The customer creates the read-only role with this External ID (via the
+    CloudFormation link), then submits the resulting Role ARN + this External ID
+    back to POST /accounts. Enforces the plan's account limit up front.
+    """
+    from urllib.parse import quote
+
+    from cspm.connectors.aws import AWSConnector
+
+    check_account_limit(db, ctx.org_id)
+    external_id = AWSConnector.generate_external_id()
+    account_id = _settings.aws_platform_account_id
+    tmpl = quote(_settings.onboarding_template_url, safe="")
+    launch_url = (
+        "https://console.aws.amazon.com/cloudformation/home#/stacks/create/review"
+        f"?templateURL={tmpl}&stackName=Aegis-CSPM-Audit-Role"
+        f"&param_AegisAccountId={account_id}&param_ExternalId={external_id}"
+    )
+    return {
+        "external_id": external_id,
+        "aegis_account_id": account_id,
+        "role_name": _settings.onboarding_role_name,
+        "launch_stack_url": launch_url,
+    }
+
+
 @router.post("/accounts", response_model=CloudAccountOut, status_code=201)
 def connect_account(
     payload: dict = Body(...),

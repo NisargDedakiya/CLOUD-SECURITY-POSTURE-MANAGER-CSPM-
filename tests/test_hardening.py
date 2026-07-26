@@ -159,3 +159,14 @@ def test_audit_verify_endpoint(client):
     client.post("/api/v1/cspm/dev/seed")
     r = client.get("/api/v1/cspm/audit/verify")
     assert r.status_code == 200 and r.json()["intact"] is True
+
+
+def test_aws_prepare_returns_external_id_and_launch_url(client):
+    r = client.post("/api/v1/cspm/accounts/aws/prepare")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["external_id"]) >= 8
+    assert body["external_id"] in body["launch_stack_url"]
+    assert "cloudformation" in body["launch_stack_url"]
+    # Each call mints a fresh id.
+    assert client.post("/api/v1/cspm/accounts/aws/prepare").json()["external_id"] != body["external_id"]

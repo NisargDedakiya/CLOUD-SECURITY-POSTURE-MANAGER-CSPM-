@@ -439,8 +439,11 @@ async function findingModal(id, refresh) {
 function connectModal(provider, refresh) {
   const forms = {
     aws: `<label>Label</label><input id="c-label" placeholder="prod" />
-          <label>Role ARN</label><input id="c-arn" placeholder="arn:aws:iam::123:role/Track2CSPMAudit" />
-          <label>External ID (optional)</label><input id="c-ext" placeholder="auto-generated" />`,
+          <div id="aws-onboard" class="card" style="margin:.5rem 0;padding:.8rem">
+            <div class="mut" style="font-size:.82rem">Preparing one-click setup…</div>
+          </div>
+          <label>Role ARN</label><input id="c-arn" placeholder="arn:aws:iam::123:role/AegisCSPMAuditRole" />
+          <input id="c-ext" type="hidden" />`,
     gcp: `<label>Label</label><input id="c-label" placeholder="prod-project" />
           <label>Service account JSON</label><textarea id="c-sa" rows="5" placeholder='{"type":"service_account",...}'></textarea>`,
     azure: `<label>Label</label><input id="c-label" placeholder="prod-sub" />
@@ -451,6 +454,21 @@ function connectModal(provider, refresh) {
     `<div class="actions"><button class="btn" data-x>Cancel</button><button class="btn primary" id="c-go">Validate & connect</button></div>`,
     (body, close) => {
       $("[data-x]", body).onclick = close;
+      // AWS: fetch a fresh External ID + one-click Launch Stack link.
+      if (provider === "aws") {
+        api("/accounts/aws/prepare", { method: "POST" }).then((p) => {
+          $("#c-ext", body).value = p.external_id;
+          const box = $("#aws-onboard", body);
+          if (box) box.innerHTML = `
+            <div style="font-size:.82rem;margin-bottom:.4rem"><b>One-click setup</b> — creates a read-only role in your AWS account.</div>
+            <a class="btn primary" href="${escapeHtml(p.launch_stack_url)}" target="_blank" rel="noopener">🚀 Launch AWS CloudFormation</a>
+            <div class="mut" style="font-size:.75rem;margin-top:.5rem">External ID (auto-filled): <code>${escapeHtml(p.external_id)}</code><br/>
+            After the stack finishes, copy its <b>RoleArn</b> output into the field below.</div>`;
+        }).catch((e) => {
+          const box = $("#aws-onboard", body);
+          if (box) box.innerHTML = `<div class="mut" style="font-size:.8rem">${escapeHtml(e.message)}</div>`;
+        });
+      }
       $("#c-go", body).onclick = async () => {
         const label = $("#c-label", body)?.value;
         let payload = { provider, label };

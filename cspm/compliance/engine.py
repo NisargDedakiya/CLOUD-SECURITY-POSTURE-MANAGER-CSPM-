@@ -7,7 +7,7 @@ it is "failed" if any finding exists for a mapped check, otherwise "passed".
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from cspm.compliance.mappings import SEED_MAPPINGS
 
@@ -70,7 +70,7 @@ def evidence_report(framework: str, findings: list) -> dict:
         if cid in applicable:
             failed_by_check.setdefault(cid, []).append(f)
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     controls = []
     for check_id in sorted(applicable):
         offenders = failed_by_check.get(check_id, [])

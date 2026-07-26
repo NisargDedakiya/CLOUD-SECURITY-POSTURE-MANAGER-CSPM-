@@ -2,12 +2,12 @@
 
 In production the CSPM router is included on the shared platform app. This
 module provides a standalone app (router + dashboard + health) so the tool can
-run on its own in dev, and creates its schema + seeds compliance mappings on
-startup.
+run on its own, with logging, request-id tracing, and error handling wired in.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,31 +15,53 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from cspm import __version__
+from cspm.api.middleware import RequestContextMiddleware, install_error_handlers
 from cspm.api.router import router
 from cspm.compliance import FRAMEWORKS
 from cspm.db import SessionLocal, init_db
+from cspm.logging_config import configure_logging, get_logger
 
 _WEB_DIR = Path(__file__).resolve().parents[2] / "web"
-
-app = FastAPI(title="Cloud Security Posture Manager", version=__version__)
-app.include_router(router)
+_log = get_logger("cspm.startup")
 
 
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    configure_logging()
     init_db()
     from cspm.compliance import seed_mappings
 
     db = SessionLocal()
     try:
-        seed_mappings(db)
+        inserted = seed_mappings(db)
+        _log.info("startup complete; seeded %s compliance mappings", inserted)
     finally:
         db.close()
+    yield
+
+
+app = FastAPI(title="Cloud Security Posture Manager", version=__version__, lifespan=lifespan)
+app.add_middleware(RequestContextMiddleware)
+install_error_handlers(app)
+app.include_router(router)
 
 
 @app.get("/api/v1/cspm/health")
 def health() -> dict:
     return {"status": "ok", "version": __version__, "frameworks": FRAMEWORKS}
+
+
+@app.get("/api/v1/cspm/ready")
+def ready() -> dict:
+    """Readiness probe: verifies the DB is reachable."""
+    from sqlalchemy import text
+
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ready"}
+    finally:
+        db.close()
 
 
 if _WEB_DIR.exists():

@@ -1,19 +1,23 @@
 """CSPM API router — mounts at /api/v1/cspm/ (spec Section 6).
 
-The router is org-scoped: every query filters by the caller's org_id from the
-shared auth context. Secret fields are never serialized back to the client.
+Org-scoped: every query filters by the caller's org_id. Mutations are RBAC-gated
+and recorded to the shared audit_log. Secret fields are never serialized back.
+List endpoints are bounded (limit/offset + X-Total-Count).
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
-from cspm.compliance import compute_scores, evidence_report, remediation_priority
+from cspm.api.pagination import limit_param, offset_param, paginate
+from cspm.compliance import compute_scores, evidence_report
+from cspm.config import get_settings
 from cspm.connectors import ConnectorError, get_connector
 from cspm.db import get_db
+from cspm.logging_config import get_logger
 from cspm.models import CloudAccount, DriftEvent, FindingRecord, ScanRun
 from cspm.schemas import (
     AWSConnectRequest,
@@ -25,14 +29,21 @@ from cspm.schemas import (
     GCPConnectRequest,
     ScanRunOut,
 )
-from cspm.service import run_audit
-from cspm.shared.deps import OrgContext, get_org_context
+from cspm.service import create_scan_run, run_audit
+from cspm.shared.audit import record_action
+from cspm.shared.deps import OrgContext, get_org_context, require_role
 
 router = APIRouter(prefix="/api/v1/cspm", tags=["cspm"])
+_log = get_logger("cspm.router")
+_settings = get_settings()
+
+# RBAC role sets.
+WRITE = require_role("admin", "analyst")
+ADMIN = require_role("admin")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _account_or_404(db: Session, ctx: OrgContext, account_id: str) -> CloudAccount:
@@ -50,7 +61,7 @@ def _account_or_404(db: Session, ctx: OrgContext, account_id: str) -> CloudAccou
 @router.post("/accounts", response_model=CloudAccountOut, status_code=201)
 def connect_account(
     payload: dict = Body(...),
-    ctx: OrgContext = Depends(get_org_context),
+    ctx: OrgContext = Depends(WRITE),
     db: Session = Depends(get_db),
 ):
     provider = payload.get("provider")
@@ -90,6 +101,15 @@ def connect_account(
     db.add(account)
     db.commit()
     db.refresh(account)
+    record_action(
+        db,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        action="cspm.account.connect",
+        resource=account.id,
+        meta={"provider": provider},
+        ip_addr=ctx.ip_addr,
+    )
     out = CloudAccountOut.model_validate(account)
     out.account_identifier = result.account_identifier
     return out
@@ -97,20 +117,25 @@ def connect_account(
 
 @router.get("/accounts", response_model=list[CloudAccountOut])
 def list_accounts(
-    ctx: OrgContext = Depends(get_org_context), db: Session = Depends(get_db)
+    response: Response,
+    limit: int = limit_param(),
+    offset: int = offset_param(),
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
 ):
-    return db.query(CloudAccount).filter_by(org_id=ctx.org_id).all()
+    q = db.query(CloudAccount).filter_by(org_id=ctx.org_id).order_by(
+        CloudAccount.created_at.desc()
+    )
+    return paginate(q, response, limit, offset)
 
 
 @router.post("/accounts/{account_id}/validate", response_model=CloudAccountOut)
 def revalidate_account(
     account_id: str,
-    ctx: OrgContext = Depends(get_org_context),
+    ctx: OrgContext = Depends(WRITE),
     db: Session = Depends(get_db),
 ):
     account = _account_or_404(db, ctx, account_id)
-    # A full re-validate would reconstruct the connector from stored fields;
-    # here we mark the timestamp (live re-validation runs in the connector).
     account.last_validated_at = _now()
     account.status = "active"
     db.commit()
@@ -121,28 +146,48 @@ def revalidate_account(
 @router.delete("/accounts/{account_id}", status_code=204)
 def disconnect_account(
     account_id: str,
-    ctx: OrgContext = Depends(get_org_context),
+    ctx: OrgContext = Depends(ADMIN),
     db: Session = Depends(get_db),
 ):
     account = _account_or_404(db, ctx, account_id)
     db.delete(account)
     db.commit()
+    record_action(
+        db,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        action="cspm.account.disconnect",
+        resource=account_id,
+        ip_addr=ctx.ip_addr,
+    )
 
 
 # ---- Module 6.2: scans -----------------------------------------------------
 @router.post("/accounts/{account_id}/scan", response_model=ScanRunOut, status_code=202)
 def trigger_scan(
     account_id: str,
-    ctx: OrgContext = Depends(get_org_context),
+    ctx: OrgContext = Depends(WRITE),
     db: Session = Depends(get_db),
 ):
     account = _account_or_404(db, ctx, account_id)
-    # In production this enqueues cspm.run_aws_audit on the 'high' queue; here we
-    # run synchronously so the dev/test path returns a completed scan.
-    try:
-        scan = run_audit(db, account)
-    except NotImplementedError as exc:
-        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    record_action(
+        db,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        action="cspm.scan.trigger",
+        resource=account_id,
+        ip_addr=ctx.ip_addr,
+    )
+    if _settings.eager_tasks:
+        try:
+            return run_audit(db, account)
+        except NotImplementedError as exc:
+            raise HTTPException(status_code=501, detail=str(exc)) from exc
+    # Async path: persist a queued run and enqueue the audit on the 'high' queue.
+    scan = create_scan_run(db, account)
+    from cspm.tasks import run_aws_audit
+
+    run_aws_audit.delay(account.id, scan.id)  # type: ignore[attr-defined]
     return scan
 
 
@@ -166,9 +211,12 @@ def scan_status(
 # ---- findings --------------------------------------------------------------
 @router.get("/findings", response_model=list[FindingOut])
 def list_findings(
-    severity: str | None = Query(default=None),
-    status: str | None = Query(default=None),
-    account_id: str | None = Query(default=None),
+    response: Response,
+    severity: str | None = None,
+    status: str | None = None,
+    account_id: str | None = None,
+    limit: int = limit_param(),
+    offset: int = offset_param(),
     ctx: OrgContext = Depends(get_org_context),
     db: Session = Depends(get_db),
 ):
@@ -179,14 +227,15 @@ def list_findings(
         q = q.filter_by(status=status)
     if account_id:
         q = q.filter_by(cloud_account_id=account_id)
-    return q.order_by(FindingRecord.discovered_at.desc()).all()
+    q = q.order_by(FindingRecord.discovered_at.desc())
+    return paginate(q, response, limit, offset)
 
 
 @router.patch("/findings/{finding_id}", response_model=FindingOut)
 def update_finding(
     finding_id: str,
     payload: FindingStatusUpdate,
-    ctx: OrgContext = Depends(get_org_context),
+    ctx: OrgContext = Depends(WRITE),
     db: Session = Depends(get_db),
 ):
     finding = (
@@ -200,6 +249,15 @@ def update_finding(
     finding.resolved_at = _now() if payload.status == "resolved" else None
     db.commit()
     db.refresh(finding)
+    record_action(
+        db,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        action="cspm.finding.update",
+        resource=finding_id,
+        meta={"status": payload.status},
+        ip_addr=ctx.ip_addr,
+    )
     return finding
 
 
@@ -242,14 +300,18 @@ def compliance_evidence(
 # ---- Module 6.4: drift -----------------------------------------------------
 @router.get("/drift", response_model=list[DriftEventOut])
 def list_drift(
-    status: str | None = Query(default=None),
+    response: Response,
+    status: str | None = None,
+    limit: int = limit_param(),
+    offset: int = offset_param(),
     ctx: OrgContext = Depends(get_org_context),
     db: Session = Depends(get_db),
 ):
     q = db.query(DriftEvent).filter_by(org_id=ctx.org_id)
     if status:
         q = q.filter_by(status=status)
-    return q.order_by(DriftEvent.detected_at.desc()).all()
+    q = q.order_by(DriftEvent.detected_at.desc())
+    return paginate(q, response, limit, offset)
 
 
 def _drift_or_404(db: Session, ctx: OrgContext, drift_id: str) -> DriftEvent:
@@ -262,21 +324,20 @@ def _drift_or_404(db: Session, ctx: OrgContext, drift_id: str) -> DriftEvent:
 @router.post("/drift/{drift_id}/approve", response_model=DriftEventOut)
 def approve_drift(
     drift_id: str,
-    ctx: OrgContext = Depends(get_org_context),
+    ctx: OrgContext = Depends(WRITE),
     db: Session = Depends(get_db),
 ):
     from cspm.models import Baseline
 
     evt = _drift_or_404(db, ctx, drift_id)
     evt.status = "approved"
-    # Approving updates the baseline to the new (after) state.
     baseline = (
         db.query(Baseline)
         .filter_by(cloud_account_id=evt.cloud_account_id, resource_id=evt.resource_id)
         .one_or_none()
     )
     if evt.after_state is None and baseline is not None:
-        db.delete(baseline)  # resource deleted → drop baseline
+        db.delete(baseline)
     elif baseline is not None:
         baseline.config_snapshot = evt.after_state
     elif evt.after_state is not None:
@@ -290,23 +351,28 @@ def approve_drift(
         )
     db.commit()
     db.refresh(evt)
+    record_action(
+        db,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        action="cspm.drift.approve",
+        resource=drift_id,
+        ip_addr=ctx.ip_addr,
+    )
     return evt
 
 
 @router.post("/drift/{drift_id}/reject", response_model=FindingOut)
 def reject_drift(
     drift_id: str,
-    ctx: OrgContext = Depends(get_org_context),
+    ctx: OrgContext = Depends(WRITE),
     db: Session = Depends(get_db),
 ):
     import hashlib
 
     evt = _drift_or_404(db, ctx, drift_id)
     evt.status = "violation"
-    # Rejecting a drift creates a finding for remediation tracking.
-    dedup = hashlib.sha256(
-        f"drift|{evt.id}|{evt.resource_id}".encode()
-    ).hexdigest()
+    dedup = hashlib.sha256(f"drift|{evt.id}|{evt.resource_id}".encode()).hexdigest()
     finding = FindingRecord(
         org_id=evt.org_id,
         cloud_account_id=evt.cloud_account_id,
@@ -321,4 +387,12 @@ def reject_drift(
     db.add(finding)
     db.commit()
     db.refresh(finding)
+    record_action(
+        db,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        action="cspm.drift.reject",
+        resource=drift_id,
+        ip_addr=ctx.ip_addr,
+    )
     return finding

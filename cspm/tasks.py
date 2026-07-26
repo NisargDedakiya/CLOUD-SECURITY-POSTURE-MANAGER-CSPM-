@@ -16,13 +16,16 @@ from cspm.models import CloudAccount
 from cspm.service import run_audit, run_drift_check
 
 
-def _run_aws_audit(cloud_account_id: str) -> dict:
+def _run_aws_audit(cloud_account_id: str, scan_run_id: str | None = None) -> dict:
+    from cspm.models import ScanRun
+
     db = SessionLocal()
     try:
         account = db.get(CloudAccount, cloud_account_id)
         if account is None:
             return {"error": "account_not_found"}
-        scan = run_audit(db, account)
+        scan = db.get(ScanRun, scan_run_id) if scan_run_id else None
+        scan = run_audit(db, account, scan=scan)
         return {"scan_run_id": scan.id, "findings": scan.findings_count}
     finally:
         db.close()

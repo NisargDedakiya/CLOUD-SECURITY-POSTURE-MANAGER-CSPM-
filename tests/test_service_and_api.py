@@ -55,8 +55,6 @@ def client(db, org, monkeypatch):
 
     import cspm.api.router as router_mod
     from cspm.api.app import app
-    from cspm.db import SessionLocal
-
     from cspm.connectors.aws import AWSConnector
     from cspm.service import run_audit as real_run_audit
 
@@ -144,7 +142,6 @@ def test_org_isolation(client, db):
     other = CloudAccount(org_id="other-org", provider="aws", role_arn="x", status="active")
     db.add(other)
     db.commit()
-    r = client.get(f"/api/v1/cspm/accounts/{other.id}/scan")
     # Not found because it's scoped to a different org.
     assert client.post(f"/api/v1/cspm/accounts/{other.id}/scan").status_code == 404
 

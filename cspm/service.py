@@ -7,7 +7,7 @@ points behave identically.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,7 @@ from cspm.models import (
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def build_auditor(account: CloudAccount, session=None) -> BaseAuditor:
@@ -40,23 +40,61 @@ def build_auditor(account: CloudAccount, session=None) -> BaseAuditor:
             external_id=account.external_id,
             session=session,
         )
-    raise NotImplementedError(
-        f"Auditor for provider '{account.provider}' is a follow-on (spec Step 5)."
-    )
+    if account.provider == "gcp":
+        from cspm.auditors.gcp import GCPAuditor
+        from cspm.security.crypto import decrypt
+
+        sa_json = decrypt(account.gcp_sa_key_enc) if account.gcp_sa_key_enc else None
+        return GCPAuditor(service_account_json=sa_json, collector=session)
+    if account.provider == "azure":
+        from cspm.auditors.azure import AzureAuditor
+        from cspm.security.crypto import decrypt
+
+        secret = decrypt(account.azure_secret_enc) if account.azure_secret_enc else None
+        return AzureAuditor(
+            tenant_id=account.azure_tenant_id,
+            client_id=account.azure_client_id,
+            client_secret=secret,
+            collector=session,
+        )
+    raise NotImplementedError(f"Unsupported provider '{account.provider}'.")
+
+
+def create_scan_run(db: Session, account: CloudAccount) -> ScanRun:
+    """Persist a queued scan run (used before async dispatch)."""
+    scan = ScanRun(cloud_account_id=account.id, status="queued")
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+    return scan
 
 
 def run_audit(
-    db: Session, account: CloudAccount, session=None
+    db: Session, account: CloudAccount, session=None, scan: ScanRun | None = None
 ) -> ScanRun:
-    """Run all checks for an account, persisting a scan run and its findings."""
-    scan = ScanRun(
-        cloud_account_id=account.id, status="running", started_at=_now()
-    )
-    db.add(scan)
+    """Run all checks for an account, persisting a scan run and its findings.
+
+    If ``scan`` is provided (a previously-queued run) it is populated in place;
+    otherwise a new run is created. This lets the API create a queued run and an
+    async worker complete the same row.
+    """
+    if scan is None:
+        scan = ScanRun(cloud_account_id=account.id, status="running", started_at=_now())
+        db.add(scan)
+    else:
+        scan.status = "running"
+        scan.started_at = _now()
     db.flush()
 
-    auditor = build_auditor(account, session=session)
-    findings: list[Finding] = auditor.run_all()
+    try:
+        auditor = build_auditor(account, session=session)
+        findings: list[Finding] = auditor.run_all()
+    except Exception:
+        scan.status = "failed"
+        scan.completed_at = _now()
+        db.commit()
+        db.refresh(scan)
+        raise
 
     persisted = 0
     for f in findings:

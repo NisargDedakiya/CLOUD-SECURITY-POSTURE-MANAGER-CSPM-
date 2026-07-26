@@ -8,9 +8,9 @@ package is testable in isolation.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import JSON, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from cspm.db import Base
@@ -21,7 +21,7 @@ def _uuid() -> str:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Organisation(Base):
@@ -41,3 +41,18 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class AuditLogEntry(Base):
+    """audit_log — immutable record of user actions (shared table, spec 2.2)."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str | None] = mapped_column(String(36))
+    user_id: Mapped[str | None] = mapped_column(String(36))
+    action: Mapped[str] = mapped_column(String(255), nullable=False)
+    resource: Mapped[str | None] = mapped_column(String(255))
+    meta: Mapped[dict | None] = mapped_column(JSON)
+    ip_addr: Mapped[str | None] = mapped_column(String(64))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

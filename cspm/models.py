@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -28,7 +28,7 @@ def _uuid() -> str:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Severity(str, enum.Enum):
@@ -75,7 +75,7 @@ class CloudAccount(Base):
     last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
-    scan_runs: Mapped[list["ScanRun"]] = relationship(
+    scan_runs: Mapped[list[ScanRun]] = relationship(
         back_populates="cloud_account", cascade="all, delete-orphan"
     )
 
@@ -96,7 +96,7 @@ class ScanRun(Base):
     findings_count: Mapped[int] = mapped_column(Integer, default=0)
 
     cloud_account: Mapped[CloudAccount] = relationship(back_populates="scan_runs")
-    findings: Mapped[list["FindingRecord"]] = relationship(
+    findings: Mapped[list[FindingRecord]] = relationship(
         back_populates="scan_run", cascade="all, delete-orphan"
     )
 

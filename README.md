@@ -90,18 +90,39 @@ POST   /drift/{id}/reject               Mark as violation (creates finding)
 - Validation runs the cheapest read-only call per provider
   (`sts.get_caller_identity()` for AWS).
 
-## Production wiring
+## Production hardening
 
-- **DB**: set `CSPM_DATABASE_URL` to Postgres; apply `migrations/001_cspm_schema.sql`
-  (or Alembic). Defaults to in-memory SQLite for dev/tests.
-- **Encryption**: set `CSPM_ENCRYPTION_KEY` (`python -c "from cspm.security.crypto import generate_key; print(generate_key())"`).
-- **Tasks**: audits enqueue on the shared `high` queue, drift on `default`;
-  security-sensitive drift re-routes an alert to `critical`.
-- **Live cloud**: install extras `pip install -e ".[gcp,azure]"`; AWS uses boto3
-  (bundled). Auditors accept an injected session for testing.
+- **Config guards** (`CSPM_ENV=production`): fails fast unless `CSPM_ENCRYPTION_KEY`
+  is set, `CSPM_DATABASE_URL` is Postgres, and `CSPM_EAGER_TASKS=false`. See
+  `.env.example`.
+- **Observability**: structured JSON logging, per-request `X-Request-Id`
+  propagation, a global 500 handler, and immutable `audit_log` writes on every
+  mutation.
+- **RBAC**: `viewer` / `analyst` / `admin` (via `X-Role`, the JWT/RBAC seam).
+  Connect/scan/patch/drift require analyst+, disconnect requires admin.
+- **Bounded lists**: every list endpoint takes `limit`/`offset` and returns
+  `X-Total-Count`.
+- **Async scans**: with `CSPM_EAGER_TASKS=false`, `POST /accounts/{id}/scan`
+  persists a queued run and enqueues `cspm.run_aws_audit` on the `high` queue;
+  poll `GET /scans/{id}`. Security-sensitive drift re-routes an alert to `critical`.
+- **Health/readiness**: `/api/v1/cspm/health` and `/api/v1/cspm/ready` (DB ping).
 
-## Tests
+## Deployment
 
 ```bash
-pytest -q      # 39 tests: crypto, connectors, auditor, compliance, drift, service, API
+# One-command local stack: Postgres + Redis + API + Celery worker
+export CSPM_ENCRYPTION_KEY=$(python -c "from cspm.security.crypto import generate_key; print(generate_key())")
+docker compose up --build
+# API on http://localhost:8000 ; migrations run automatically (alembic upgrade head)
+```
+
+- **Migrations**: `alembic upgrade head` (or the raw `migrations/001_cspm_schema.sql`).
+- **Live cloud**: `pip install -e ".[gcp,azure]"`; AWS uses bundled boto3.
+- **CI**: `.github/workflows/ci.yml` runs `ruff` + `pytest` on every push/PR.
+
+## Tests & lint
+
+```bash
+pytest -q              # 49 tests across every module
+ruff check cspm tests  # lint
 ```

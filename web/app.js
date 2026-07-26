@@ -4,7 +4,11 @@ const FRAMEWORKS = ["cis_aws_v2", "soc2", "iso27001", "pci_dss_v4"];
 const $ = (id) => document.getElementById(id);
 
 function headers() {
-  return { "Content-Type": "application/json", "X-Org-Id": $("org-id").value.trim() };
+  return {
+    "Content-Type": "application/json",
+    "X-Org-Id": $("org-id").value.trim(),
+    "X-Role": "admin",
+  };
 }
 
 async function api(path, opts = {}) {

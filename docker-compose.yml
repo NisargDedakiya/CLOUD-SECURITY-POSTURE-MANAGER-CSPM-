@@ -1,0 +1,54 @@
+# Local production-like stack: API + Celery worker + Postgres + Redis.
+# This mirrors the shared platform topology (spec 2.1/2.3) for CSPM in isolation.
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: cspm
+      POSTGRES_PASSWORD: cspm
+      POSTGRES_DB: cspm
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cspm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    environment: &env
+      CSPM_ENV: staging
+      CSPM_DATABASE_URL: postgresql+psycopg://cspm:cspm@db:5432/cspm
+      CSPM_REDIS_URL: redis://redis:6379/0
+      CSPM_EAGER_TASKS: "false"
+      CSPM_ENCRYPTION_KEY: ${CSPM_ENCRYPTION_KEY:?set CSPM_ENCRYPTION_KEY in your .env}
+      CSPM_JSON_LOGS: "true"
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    ports: ["8000:8000"]
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn cspm.api.app:app --host 0.0.0.0 --port 8000"
+
+  worker:
+    build: .
+    environment: *env
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    command: celery -A cspm.celery_app.app worker -Q high,default,critical,low -l info
+
+volumes:
+  pgdata:

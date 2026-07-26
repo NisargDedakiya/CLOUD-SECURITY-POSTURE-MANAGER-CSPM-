@@ -10,7 +10,7 @@ live ``AssumeRole`` call, so each check can be exercised with fake clients.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from cspm.auditors.base import BaseAuditor
 from cspm.auditors.findings import Finding
@@ -108,7 +108,7 @@ class AWSAuditor(BaseAuditor):
     def check_iam_access_key_age(self) -> list[Finding]:
         iam = self.session.client("iam")
         findings: list[Finding] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for user in iam.list_users().get("Users", []):
             uname = user["UserName"]
             for key in iam.list_access_keys(UserName=uname).get("AccessKeyMetadata", []):
@@ -116,7 +116,7 @@ class AWSAuditor(BaseAuditor):
                 if created is None:
                     continue
                 if created.tzinfo is None:
-                    created = created.replace(tzinfo=timezone.utc)
+                    created = created.replace(tzinfo=UTC)
                 age = (now - created).days
                 if key.get("Status") == "Active" and age > ACCESS_KEY_MAX_AGE_DAYS:
                     findings.append(

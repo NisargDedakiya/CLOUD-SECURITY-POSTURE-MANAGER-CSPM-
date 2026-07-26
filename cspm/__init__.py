@@ -10,4 +10,4 @@ Modules (built in spec order):
     6.4  drift       — baseline snapshot + deep-diff continuous drift detection
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

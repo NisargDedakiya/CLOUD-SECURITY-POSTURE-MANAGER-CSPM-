@@ -7,7 +7,7 @@ implemented.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 
 class _ClientError(Exception):
@@ -80,7 +80,7 @@ class _FakeIAM:
         return {"Users": [{"UserName": "alice"}]}
 
     def list_access_keys(self, UserName):  # noqa: N803
-        old = datetime.now(timezone.utc) - timedelta(days=200)
+        old = datetime.now(UTC) - timedelta(days=200)
         return {
             "AccessKeyMetadata": [
                 {"AccessKeyId": "AKIAOLD", "Status": "Active", "CreateDate": old}
@@ -154,6 +154,63 @@ class _FakeGuardDuty:
 class _FakeSTS:
     def get_caller_identity(self):
         return {"Account": "123456789012", "Arn": "arn:aws:sts::123456789012:assumed-role/x"}
+
+
+class FakeGCPCollector:
+    """Intentionally-insecure GCP resources for demos/tests."""
+
+    def buckets(self):
+        return [
+            {"name": "public-assets", "iam_members": ["allUsers"], "uniform_bucket_level_access": False},
+            {"name": "internal", "iam_members": ["user:ops@x"], "uniform_bucket_level_access": True},
+        ]
+
+    def firewalls(self):
+        return [
+            {
+                "name": "allow-rdp",
+                "direction": "INGRESS",
+                "source_ranges": ["0.0.0.0/0"],
+                "allowed": [{"ports": ["3389"]}],
+            }
+        ]
+
+    def instances(self):
+        return [{"name": "web-1", "has_public_ip": True}]
+
+    def service_accounts(self):
+        return [{"email": "deploy@x.iam", "keys": [{"age_days": 120}]}]
+
+
+class FakeAzureCollector:
+    """Intentionally-insecure Azure resources for demos/tests."""
+
+    def storage_accounts(self):
+        return [
+            {"name": "publicdata", "https_only": False, "allow_blob_public_access": True},
+            {"name": "securestore", "https_only": True, "allow_blob_public_access": False},
+        ]
+
+    def network_security_groups(self):
+        return [
+            {
+                "name": "web-nsg",
+                "security_rules": [
+                    {
+                        "direction": "Inbound",
+                        "access": "Allow",
+                        "source_address_prefix": "*",
+                        "destination_port_range": "3389",
+                    }
+                ],
+            }
+        ]
+
+    def sql_servers(self):
+        return [{"name": "prod-sql", "auditing_enabled": False}]
+
+    def virtual_machines(self):
+        return [{"name": "app-vm", "disk_encryption_enabled": False}]
 
 
 class FakeAWSSession:

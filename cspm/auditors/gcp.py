@@ -1,0 +1,134 @@
+"""GCP Security Audit Engine (follow-on to AWS, spec Step 5).
+
+Mirrors the AWS class-based ``check_*`` pattern. A collector object may be
+injected for testing; in production it wraps google-cloud client libraries
+authenticated from the stored service-account key.
+"""
+
+from __future__ import annotations
+
+from cspm.auditors.base import BaseAuditor
+from cspm.auditors.findings import Finding
+
+
+class GCPAuditor(BaseAuditor):
+    provider = "gcp"
+
+    def __init__(self, service_account_json: str | None = None, collector=None) -> None:
+        self.service_account_json = service_account_json
+        # collector exposes: buckets(), firewalls(), instances(), service_accounts()
+        self.collector = collector or _LiveGCPCollector(service_account_json)
+
+    def check_bucket_public_access(self) -> list[Finding]:
+        findings = []
+        for b in self.collector.buckets():
+            members = set(b.get("iam_members", []))
+            if members & {"allUsers", "allAuthenticatedUsers"}:
+                findings.append(
+                    Finding(
+                        resource=b["name"],
+                        check="Cloud Storage bucket is publicly accessible",
+                        check_id="gcp_bucket_public",
+                        severity="critical",
+                        remediation="Remove allUsers/allAuthenticatedUsers from the bucket IAM policy.",
+                    )
+                )
+        return findings
+
+    def check_bucket_uniform_access(self) -> list[Finding]:
+        findings = []
+        for b in self.collector.buckets():
+            if not b.get("uniform_bucket_level_access"):
+                findings.append(
+                    Finding(
+                        resource=b["name"],
+                        check="Bucket does not enforce uniform bucket-level access",
+                        check_id="gcp_bucket_ubla",
+                        severity="medium",
+                        remediation="Enable uniform bucket-level access to disable ACLs.",
+                    )
+                )
+        return findings
+
+    def check_firewall_open_ingress(self) -> list[Finding]:
+        findings = []
+        for fw in self.collector.firewalls():
+            if fw.get("direction", "INGRESS") != "INGRESS":
+                continue
+            if "0.0.0.0/0" not in fw.get("source_ranges", []):
+                continue
+            ports = {p for a in fw.get("allowed", []) for p in a.get("ports", [])}
+            if {"22", "3389"} & ports or not ports:
+                findings.append(
+                    Finding(
+                        resource=fw["name"],
+                        check="Firewall allows 0.0.0.0/0 to management ports",
+                        check_id="gcp_firewall_open",
+                        severity="high",
+                        remediation="Restrict source ranges for SSH/RDP to trusted networks.",
+                    )
+                )
+        return findings
+
+    def check_instance_public_ip(self) -> list[Finding]:
+        findings = []
+        for inst in self.collector.instances():
+            if inst.get("has_public_ip"):
+                findings.append(
+                    Finding(
+                        resource=inst["name"],
+                        check="Compute instance has an external IP",
+                        check_id="gcp_instance_public_ip",
+                        severity="medium",
+                        remediation="Remove the external IP; use Cloud NAT / IAP instead.",
+                    )
+                )
+        return findings
+
+    def check_sa_key_rotation(self) -> list[Finding]:
+        findings = []
+        for sa in self.collector.service_accounts():
+            max_age = max((k.get("age_days", 0) for k in sa.get("keys", [])), default=0)
+            if max_age >= 90:
+                findings.append(
+                    Finding(
+                        resource=sa["email"],
+                        check="Service account key older than 90 days",
+                        check_id="gcp_sa_key_age",
+                        severity="medium",
+                        remediation="Rotate and delete service-account keys older than 90 days.",
+                    )
+                )
+        return findings
+
+    def resource_snapshots(self) -> dict[str, dict]:
+        snaps: dict[str, dict] = {}
+        for b in self.collector.buckets():
+            snaps[f"gcs:{b['name']}"] = {"type": "storage_bucket", **b}
+        for fw in self.collector.firewalls():
+            snaps[f"fw:{fw['name']}"] = {"type": "firewall_rule", **fw}
+        return snaps
+
+
+class _LiveGCPCollector:  # pragma: no cover - requires google-cloud + creds
+    def __init__(self, service_account_json: str | None) -> None:
+        if not service_account_json:
+            raise ValueError("service_account_json required for live GCP auditing.")
+        self.service_account_json = service_account_json
+
+    def _not_impl(self):
+        raise NotImplementedError(
+            "Live GCP collection requires google-cloud client libraries."
+        )
+
+    def buckets(self):
+        self._not_impl()
+
+    def firewalls(self):
+        self._not_impl()
+
+    def instances(self):
+        self._not_impl()
+
+    def service_accounts(self):
+        self._not_impl()

@@ -7,7 +7,9 @@ control lists — it is not user-editable data.
 
 from __future__ import annotations
 
-FRAMEWORKS = ["cis_aws_v2", "soc2", "iso27001", "pci_dss_v4"]
+FRAMEWORKS = [
+    "cis_aws_v2", "cis_gcp_v2", "cis_azure_v2", "soc2", "iso27001", "pci_dss_v4"
+]
 
 # check_id -> {framework: [control_ids]}
 SEED_MAPPINGS: dict[str, dict[str, list[str]]] = {
@@ -119,6 +121,22 @@ SEED_MAPPINGS: dict[str, dict[str, list[str]]] = {
         "soc2": ["CC6.7"],
         "pci_dss_v4": ["3.6.1"],
     },
+    # GCP
+    "gcp_bucket_public": {"cis_gcp_v2": ["5.1"], "soc2": ["CC6.1"]},
+    "gcp_bucket_ubla": {"cis_gcp_v2": ["5.2"], "soc2": ["CC6.1"]},
+    "gcp_firewall_open": {"cis_gcp_v2": ["3.6"], "soc2": ["CC6.6"]},
+    "gcp_instance_public_ip": {"cis_gcp_v2": ["4.9"], "soc2": ["CC6.6"]},
+    "gcp_sa_key_age": {"cis_gcp_v2": ["1.7"], "soc2": ["CC6.1"]},
+    "gcp_sql_public_ip": {"cis_gcp_v2": ["6.5"], "soc2": ["CC6.6"]},
+    "gcp_audit_logging": {"cis_gcp_v2": ["2.1"], "soc2": ["CC7.2"]},
+    # Azure
+    "azure_storage_https": {"cis_azure_v2": ["3.1"], "soc2": ["CC6.7"]},
+    "azure_storage_public_blob": {"cis_azure_v2": ["3.7"], "soc2": ["CC6.1"]},
+    "azure_storage_min_tls": {"cis_azure_v2": ["3.12"], "soc2": ["CC6.7"]},
+    "azure_nsg_open_mgmt": {"cis_azure_v2": ["6.1"], "soc2": ["CC6.6"]},
+    "azure_sql_auditing": {"cis_azure_v2": ["4.1.1"], "soc2": ["CC7.2"]},
+    "azure_vm_disk_encryption": {"cis_azure_v2": ["7.2"], "soc2": ["CC6.7"]},
+    "azure_keyvault_protection": {"cis_azure_v2": ["8.4"], "soc2": ["CC6.7"]},
 }
 
 

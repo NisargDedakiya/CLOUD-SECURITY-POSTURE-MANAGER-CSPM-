@@ -207,15 +207,26 @@ class FakeGCPCollector:
     def service_accounts(self):
         return [{"email": "deploy@x.iam", "keys": [{"age_days": 120}]}]
 
+    def sql_instances(self):
+        return [{"name": "prod-sql", "public_ip": True}]
+
+    def audit_config(self):
+        return {"project": "demo", "all_services_data_access": False}
+
 
 class FakeAzureCollector:
     """Intentionally-insecure Azure resources for demos/tests."""
 
     def storage_accounts(self):
         return [
-            {"name": "publicdata", "https_only": False, "allow_blob_public_access": True},
-            {"name": "securestore", "https_only": True, "allow_blob_public_access": False},
+            {"name": "publicdata", "https_only": False, "allow_blob_public_access": True,
+             "min_tls_version": "TLS1_0"},
+            {"name": "securestore", "https_only": True, "allow_blob_public_access": False,
+             "min_tls_version": "TLS1_2"},
         ]
+
+    def key_vaults(self):
+        return [{"name": "app-kv", "soft_delete_enabled": True, "purge_protection": False}]
 
     def network_security_groups(self):
         return [

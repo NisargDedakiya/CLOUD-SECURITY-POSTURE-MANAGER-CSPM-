@@ -102,8 +102,14 @@ class Settings:
         self.metrics_enabled: bool = _get_bool("CSPM_METRICS_ENABLED", default=True)
 
         # ---- Billing / subscriptions --------------------------------------
-        # "manual" (no external gateway; plans set directly) or "stripe".
+        # "manual" (no external gateway; plans set directly), "stripe", or "razorpay".
         self.billing_mode: str = os.getenv("CSPM_BILLING_MODE", "manual").lower()
+        # Razorpay (INR-friendly). Plan IDs from your Razorpay dashboard.
+        self.razorpay_key_id: str | None = os.getenv("CSPM_RAZORPAY_KEY_ID")
+        self.razorpay_key_secret: str | None = os.getenv("CSPM_RAZORPAY_KEY_SECRET")
+        self.razorpay_webhook_secret: str | None = os.getenv("CSPM_RAZORPAY_WEBHOOK_SECRET")
+        self.razorpay_plan_starter: str | None = os.getenv("CSPM_RAZORPAY_PLAN_STARTER")
+        self.razorpay_plan_pro: str | None = os.getenv("CSPM_RAZORPAY_PLAN_PRO")
         self.stripe_secret_key: str | None = os.getenv("CSPM_STRIPE_SECRET_KEY")
         self.stripe_webhook_secret: str | None = os.getenv("CSPM_STRIPE_WEBHOOK_SECRET")
         # Stripe Price IDs per plan (from your Stripe dashboard).

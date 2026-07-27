@@ -38,17 +38,17 @@ def test_development_has_safe_defaults(monkeypatch):
 def test_gcp_auditor_flags_public_bucket():
     findings = GCPAuditor(collector=FakeGCPCollector()).run_all()
     ids = {f.check_id for f in findings}
-    assert "gcp_bucket_public" in ids
-    assert "gcp_firewall_open" in ids
-    assert "gcp_sa_key_age" in ids
+    assert {"gcp_bucket_public", "gcp_firewall_open", "gcp_sa_key_age",
+            "gcp_sql_public_ip", "gcp_audit_logging"} <= ids
+    assert not any(f.check_id.endswith("_error") for f in findings)
 
 
 def test_azure_auditor_flags_public_blob():
     findings = AzureAuditor(collector=FakeAzureCollector()).run_all()
     ids = {f.check_id for f in findings}
-    assert "azure_storage_public_blob" in ids
-    assert "azure_nsg_open_mgmt" in ids
-    assert "azure_vm_disk_encryption" in ids
+    assert {"azure_storage_public_blob", "azure_nsg_open_mgmt", "azure_vm_disk_encryption",
+            "azure_storage_min_tls", "azure_keyvault_protection"} <= ids
+    assert not any(f.check_id.endswith("_error") for f in findings)
 
 
 def test_gcp_secure_bucket_not_flagged():

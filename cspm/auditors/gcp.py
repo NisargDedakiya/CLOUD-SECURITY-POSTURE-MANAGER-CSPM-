@@ -103,6 +103,35 @@ class GCPAuditor(BaseAuditor):
                 )
         return findings
 
+    def check_sql_public_ip(self) -> list[Finding]:
+        findings = []
+        for inst in self.collector.sql_instances():
+            if inst.get("public_ip"):
+                findings.append(
+                    Finding(
+                        resource=inst["name"],
+                        check="Cloud SQL instance has a public IP",
+                        check_id="gcp_sql_public_ip",
+                        severity="high",
+                        remediation="Disable the public IP; use Private Service Connect / private IP.",
+                    )
+                )
+        return findings
+
+    def check_audit_logging(self) -> list[Finding]:
+        cfg = self.collector.audit_config()
+        if not cfg.get("all_services_data_access"):
+            return [
+                Finding(
+                    resource=f"project/{cfg.get('project', 'unknown')}",
+                    check="Project audit logging not fully enabled",
+                    check_id="gcp_audit_logging",
+                    severity="medium",
+                    remediation="Enable Data Access audit logs for all services in the IAM policy.",
+                )
+            ]
+        return []
+
     def resource_snapshots(self) -> dict[str, dict]:
         snaps: dict[str, dict] = {}
         for b in self.collector.buckets():
@@ -226,3 +255,25 @@ class _LiveGCPCollector:  # pragma: no cover - requires google-cloud + creds
                 keys.append({"age_days": age})
             out.append({"email": sa["email"], "keys": keys})
         return out
+
+    def sql_instances(self) -> list[dict]:
+        from googleapiclient.discovery import build
+
+        svc = build("sqladmin", "v1beta4", credentials=self._creds, cache_discovery=False)
+        out = []
+        for inst in svc.instances().list(project=self.project).execute().get("items", []):
+            ip_cfg = inst.get("settings", {}).get("ipConfiguration", {})
+            out.append({"name": inst["name"], "public_ip": ip_cfg.get("ipv4Enabled", False)})
+        return out
+
+    def audit_config(self) -> dict:
+        from googleapiclient.discovery import build
+
+        crm = build("cloudresourcemanager", "v1", credentials=self._creds, cache_discovery=False)
+        policy = crm.projects().getIamPolicy(resource=self.project, body={}).execute()
+        all_svcs = any(
+            a.get("service") == "allServices"
+            and any(c.get("logType") == "DATA_READ" for c in a.get("auditLogConfigs", []))
+            for a in policy.get("auditConfigs", [])
+        )
+        return {"project": self.project, "all_services_data_access": all_svcs}

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from cspm.billing import PLANS, plan_public, usage_summary
 from cspm.billing.entitlements import get_subscription
-from cspm.billing.stripe_gateway import (
+from cspm.billing.gateway import (
     BillingError,
     create_checkout,
     create_portal,
@@ -103,7 +103,7 @@ def portal(ctx: OrgContext = Depends(ADMIN), db: Session = Depends(get_db)):
 
 @billing_router.get("/invoices")
 def invoices(ctx: OrgContext = Depends(ADMIN), db: Session = Depends(get_db)):
-    from cspm.billing.stripe_gateway import list_invoices
+    from cspm.billing.gateway import list_invoices
 
     return {"invoices": list_invoices(db, ctx.org_id)}
 

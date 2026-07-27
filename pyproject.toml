@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cspm"
-version = "0.6.0"
+version = "0.7.0"
 description = "Tool 6 — Cloud Security Posture Manager (AWS/GCP/Azure) for the Track 2 platform"
 readme = "README.md"
 requires-python = ">=3.11"

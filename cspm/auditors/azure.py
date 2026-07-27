@@ -111,6 +111,37 @@ class AzureAuditor(BaseAuditor):
                 )
         return findings
 
+    def check_storage_min_tls(self) -> list[Finding]:
+        findings = []
+        for sa in self.collector.storage_accounts():
+            tls = str(sa.get("min_tls_version", "")).replace("_", ".")
+            if tls and tls < "TLS1.2":
+                findings.append(
+                    Finding(
+                        resource=sa["name"],
+                        check="Storage account allows TLS below 1.2",
+                        check_id="azure_storage_min_tls",
+                        severity="medium",
+                        remediation="Set the storage account minimum TLS version to 1.2.",
+                    )
+                )
+        return findings
+
+    def check_keyvault_soft_delete(self) -> list[Finding]:
+        findings = []
+        for kv in self.collector.key_vaults():
+            if not kv.get("soft_delete_enabled") or not kv.get("purge_protection"):
+                findings.append(
+                    Finding(
+                        resource=kv["name"],
+                        check="Key Vault missing soft-delete / purge protection",
+                        check_id="azure_keyvault_protection",
+                        severity="high",
+                        remediation="Enable soft-delete and purge protection on the Key Vault.",
+                    )
+                )
+        return findings
+
     def resource_snapshots(self) -> dict[str, dict]:
         snaps: dict[str, dict] = {}
         for sa in self.collector.storage_accounts():
@@ -148,6 +179,7 @@ class _LiveAzureCollector:  # pragma: no cover - requires azure-mgmt + creds
                     "allow_blob_public_access": bool(
                         getattr(sa, "allow_blob_public_access", False)
                     ),
+                    "min_tls_version": getattr(sa, "minimum_tls_version", "TLS1_2"),
                 }
             )
         return out
@@ -193,4 +225,18 @@ class _LiveAzureCollector:  # pragma: no cover - requires azure-mgmt + creds
                 getattr(getattr(vm, "security_profile", None), "encryption_at_host", False)
             )
             out.append({"name": vm.name, "disk_encryption_enabled": encrypted})
+        return out
+
+    def key_vaults(self) -> list[dict]:
+        from azure.mgmt.keyvault import KeyVaultManagementClient
+
+        client = KeyVaultManagementClient(self._cred, self.subscription_id)
+        out = []
+        for kv in client.vaults.list_by_subscription():
+            props = getattr(kv, "properties", None)
+            out.append({
+                "name": kv.name,
+                "soft_delete_enabled": bool(getattr(props, "enable_soft_delete", False)),
+                "purge_protection": bool(getattr(props, "enable_purge_protection", False)),
+            })
         return out

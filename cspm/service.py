@@ -61,6 +61,41 @@ def build_auditor(account: CloudAccount, session=None) -> BaseAuditor:
     raise NotImplementedError(f"Unsupported provider '{account.provider}'.")
 
 
+def _persist_findings(
+    db: Session, account: CloudAccount, scan: ScanRun, findings: list[Finding]
+) -> int:
+    """Persist findings, deduping both against the DB and within this batch.
+
+    Two findings in one scan can share a dedup_hash (e.g. a region-less resource
+    seen across regions); tracking a local ``seen`` set avoids a UNIQUE violation
+    at commit time.
+    """
+    persisted = 0
+    seen: set[str] = set()
+    for f in findings:
+        dedup = f.dedup_hash(account.id)
+        if dedup in seen:
+            continue
+        seen.add(dedup)
+        if db.query(FindingRecord).filter_by(dedup_hash=dedup).one_or_none() is not None:
+            continue
+        db.add(
+            FindingRecord(
+                org_id=account.org_id,
+                cloud_account_id=account.id,
+                scan_run_id=scan.id,
+                check_id=f.check_id,
+                resource=f.resource,
+                severity=f.severity,
+                description=f.description,
+                remediation=f.remediation,
+                dedup_hash=dedup,
+            )
+        )
+        persisted += 1
+    return persisted
+
+
 def create_scan_run(db: Session, account: CloudAccount) -> ScanRun:
     """Persist a queued scan run (used before async dispatch)."""
     scan = ScanRun(cloud_account_id=account.id, status="queued")
@@ -97,28 +132,7 @@ def run_audit(
         db.refresh(scan)
         raise
 
-    persisted = 0
-    for f in findings:
-        dedup = f.dedup_hash(account.id)
-        existing = (
-            db.query(FindingRecord).filter_by(dedup_hash=dedup).one_or_none()
-        )
-        if existing is not None:
-            continue
-        db.add(
-            FindingRecord(
-                org_id=account.org_id,
-                cloud_account_id=account.id,
-                scan_run_id=scan.id,
-                check_id=f.check_id,
-                resource=f.resource,
-                severity=f.severity,
-                description=f.description,
-                remediation=f.remediation,
-                dedup_hash=dedup,
-            )
-        )
-        persisted += 1
+    persisted = _persist_findings(db, account, scan, findings)
 
     scan.status = "completed"
     scan.completed_at = _now()
@@ -200,25 +214,7 @@ def ingest_findings(
     scan = ScanRun(cloud_account_id=account.id, status="running", started_at=_now())
     db.add(scan)
     db.flush()
-    persisted = 0
-    for f in findings:
-        dedup = f.dedup_hash(account.id)
-        if db.query(FindingRecord).filter_by(dedup_hash=dedup).one_or_none() is not None:
-            continue
-        db.add(
-            FindingRecord(
-                org_id=account.org_id,
-                cloud_account_id=account.id,
-                scan_run_id=scan.id,
-                check_id=f.check_id,
-                resource=f.resource,
-                severity=f.severity,
-                description=f.description,
-                remediation=f.remediation,
-                dedup_hash=dedup,
-            )
-        )
-        persisted += 1
+    persisted = _persist_findings(db, account, scan, findings)
     scan.status = "completed"
     scan.completed_at = _now()
     scan.checks_run = len(findings)

@@ -68,6 +68,12 @@ class _FakeS3:
             return {"ServerSideEncryptionConfiguration": {"Rules": []}}
         raise _client_error("ServerSideEncryptionConfigurationNotFoundError")
 
+    def get_bucket_versioning(self, Bucket):  # noqa: N803
+        return {"Status": "Enabled"} if Bucket == "secure-bucket" else {}
+
+    def get_bucket_logging(self, Bucket):  # noqa: N803
+        return {"LoggingEnabled": {"TargetBucket": "logs"}} if Bucket == "secure-bucket" else {}
+
 
 class _FakeIAM:
     def get_account_summary(self):
@@ -89,6 +95,9 @@ class _FakeIAM:
 
     def list_attached_user_policies(self, UserName):  # noqa: N803
         return {"AttachedPolicies": [{"PolicyName": "AdministratorAccess"}]}
+
+    def list_mfa_devices(self, UserName):  # noqa: N803
+        return {"MFADevices": []}  # no MFA → finding
 
 
 class _FakeEC2:
@@ -119,6 +128,18 @@ class _FakeEC2:
             ]
         }
 
+    def get_ebs_encryption_by_default(self):
+        return {"EbsEncryptionByDefault": False}
+
+    def describe_volumes(self):
+        return {"Volumes": [{"VolumeId": "vol-abc", "Encrypted": False}]}
+
+    def describe_vpcs(self):
+        return {"Vpcs": [{"VpcId": "vpc-123"}]}
+
+    def describe_flow_logs(self):
+        return {"FlowLogs": []}  # no flow logs → finding
+
 
 class _FakeRDS:
     def describe_db_instances(self):
@@ -135,7 +156,12 @@ class _FakeRDS:
 
 class _FakeCloudTrail:
     def describe_trails(self):
-        return {"trailList": [{"Name": "t", "IsMultiRegionTrail": False}]}
+        return {"trailList": [{"Name": "t", "IsMultiRegionTrail": False, "LogFileValidationEnabled": False}]}
+
+
+class _FakeSecretsManager:
+    def list_secrets(self):
+        return {"SecretList": [{"Name": "db-password", "ARN": "arn:sm:db", "RotationEnabled": False}]}
 
 
 class _FakeKMS:
@@ -225,6 +251,7 @@ class FakeAWSSession:
         "kms": _FakeKMS,
         "guardduty": _FakeGuardDuty,
         "sts": _FakeSTS,
+        "secretsmanager": _FakeSecretsManager,
     }
 
     def __init__(self) -> None:

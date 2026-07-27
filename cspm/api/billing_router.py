@@ -101,6 +101,13 @@ def portal(ctx: OrgContext = Depends(ADMIN), db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@billing_router.get("/invoices")
+def invoices(ctx: OrgContext = Depends(ADMIN), db: Session = Depends(get_db)):
+    from cspm.billing.stripe_gateway import list_invoices
+
+    return {"invoices": list_invoices(db, ctx.org_id)}
+
+
 @billing_router.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
     """Stripe webhook — unauthenticated; verified by signature."""

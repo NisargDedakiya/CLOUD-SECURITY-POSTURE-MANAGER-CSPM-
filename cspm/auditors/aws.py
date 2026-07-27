@@ -372,6 +372,212 @@ class AWSAuditor(BaseAuditor):
                 )
         return findings
 
+    # ---- S3 (additional) ---------------------------------------------------
+    def check_s3_versioning(self) -> list[Finding]:
+        s3 = self.session.client("s3")
+        findings: list[Finding] = []
+        for bucket in s3.list_buckets().get("Buckets", []):
+            name = bucket["Name"]
+            try:
+                v = s3.get_bucket_versioning(Bucket=name)
+            except Exception:  # noqa: BLE001
+                v = {}
+            if v.get("Status") != "Enabled":
+                findings.append(
+                    Finding(
+                        resource=f"arn:aws:s3:::{name}",
+                        check="S3 bucket versioning disabled",
+                        check_id="aws_s3_versioning",
+                        severity="medium",
+                        remediation="Enable versioning to protect against overwrite/delete and ransomware.",
+                    )
+                )
+        return findings
+
+    def check_s3_access_logging(self) -> list[Finding]:
+        s3 = self.session.client("s3")
+        findings: list[Finding] = []
+        for bucket in s3.list_buckets().get("Buckets", []):
+            name = bucket["Name"]
+            try:
+                log = s3.get_bucket_logging(Bucket=name)
+            except Exception:  # noqa: BLE001
+                log = {}
+            if not log.get("LoggingEnabled"):
+                findings.append(
+                    Finding(
+                        resource=f"arn:aws:s3:::{name}",
+                        check="S3 server access logging disabled",
+                        check_id="aws_s3_access_logging",
+                        severity="low",
+                        remediation="Enable S3 server access logging to a dedicated log bucket.",
+                    )
+                )
+        return findings
+
+    # ---- EC2 / EBS (additional) -------------------------------------------
+    def check_ebs_encryption_by_default(self) -> list[Finding]:
+        findings: list[Finding] = []
+        for region in self.regions:
+            ec2 = self.session.client("ec2", region_name=region)
+            try:
+                enabled = ec2.get_ebs_encryption_by_default().get(
+                    "EbsEncryptionByDefault"
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            if not enabled:
+                findings.append(
+                    Finding(
+                        resource=f"{region}/ebs",
+                        check="EBS encryption by default disabled",
+                        check_id="aws_ebs_default_encryption",
+                        severity="medium",
+                        remediation="Enable 'EBS encryption by default' in the EC2 settings for this region.",
+                        region=region,
+                    )
+                )
+        return findings
+
+    def check_ebs_volume_encryption(self) -> list[Finding]:
+        findings: list[Finding] = []
+        for region in self.regions:
+            ec2 = self.session.client("ec2", region_name=region)
+            for vol in ec2.describe_volumes().get("Volumes", []):
+                if not vol.get("Encrypted"):
+                    findings.append(
+                        Finding(
+                            resource=f"{region}/{vol['VolumeId']}",
+                            check="EBS volume is not encrypted",
+                            check_id="aws_ebs_volume_encryption",
+                            severity="high",
+                            remediation="Encrypt the volume (snapshot → copy with encryption → restore).",
+                            region=region,
+                        )
+                    )
+        return findings
+
+    # ---- IAM (additional) --------------------------------------------------
+    def check_iam_user_mfa(self) -> list[Finding]:
+        iam = self.session.client("iam")
+        findings: list[Finding] = []
+        for user in iam.list_users().get("Users", []):
+            uname = user["UserName"]
+            devices = iam.list_mfa_devices(UserName=uname).get("MFADevices", [])
+            if not devices:
+                findings.append(
+                    Finding(
+                        resource=f"iam-user/{uname}",
+                        check="IAM user without MFA",
+                        check_id="aws_iam_user_mfa",
+                        severity="high",
+                        remediation="Enable an MFA device for this IAM user.",
+                    )
+                )
+        return findings
+
+    # ---- CloudTrail (additional) ------------------------------------------
+    def check_cloudtrail_log_validation(self) -> list[Finding]:
+        ct = self.session.client("cloudtrail", region_name=self.regions[0])
+        findings: list[Finding] = []
+        for trail in ct.describe_trails().get("trailList", []):
+            if not trail.get("LogFileValidationEnabled"):
+                findings.append(
+                    Finding(
+                        resource=trail.get("TrailARN", trail.get("Name", "trail")),
+                        check="CloudTrail log file validation disabled",
+                        check_id="aws_cloudtrail_log_validation",
+                        severity="medium",
+                        remediation="Enable log file validation to detect tampering of CloudTrail logs.",
+                    )
+                )
+        return findings
+
+    # ---- VPC ---------------------------------------------------------------
+    def check_vpc_flow_logs(self) -> list[Finding]:
+        findings: list[Finding] = []
+        for region in self.regions:
+            ec2 = self.session.client("ec2", region_name=region)
+            try:
+                vpcs = ec2.describe_vpcs().get("Vpcs", [])
+                flow = ec2.describe_flow_logs().get("FlowLogs", [])
+            except Exception:  # noqa: BLE001
+                continue
+            with_logs = {f.get("ResourceId") for f in flow}
+            for vpc in vpcs:
+                if vpc["VpcId"] not in with_logs:
+                    findings.append(
+                        Finding(
+                            resource=f"{region}/{vpc['VpcId']}",
+                            check="VPC flow logs not enabled",
+                            check_id="aws_vpc_flow_logs",
+                            severity="medium",
+                            remediation="Enable VPC flow logs to capture network traffic metadata.",
+                            region=region,
+                        )
+                    )
+        return findings
+
+    # ---- RDS (additional) --------------------------------------------------
+    def check_rds_backup_retention(self) -> list[Finding]:
+        findings: list[Finding] = []
+        for region in self.regions:
+            rds = self.session.client("rds", region_name=region)
+            for db in rds.describe_db_instances().get("DBInstances", []):
+                if db.get("BackupRetentionPeriod", 0) < 7:
+                    findings.append(
+                        Finding(
+                            resource=f"{region}/{db['DBInstanceIdentifier']}",
+                            check="RDS automated backup retention below 7 days",
+                            check_id="aws_rds_backup_retention",
+                            severity="medium",
+                            remediation="Set BackupRetentionPeriod to at least 7 days.",
+                            region=region,
+                        )
+                    )
+        return findings
+
+    def check_rds_deletion_protection(self) -> list[Finding]:
+        findings: list[Finding] = []
+        for region in self.regions:
+            rds = self.session.client("rds", region_name=region)
+            for db in rds.describe_db_instances().get("DBInstances", []):
+                if not db.get("DeletionProtection"):
+                    findings.append(
+                        Finding(
+                            resource=f"{region}/{db['DBInstanceIdentifier']}",
+                            check="RDS deletion protection disabled",
+                            check_id="aws_rds_deletion_protection",
+                            severity="low",
+                            remediation="Enable deletion protection on the RDS instance.",
+                            region=region,
+                        )
+                    )
+        return findings
+
+    # ---- Secrets Manager ---------------------------------------------------
+    def check_secretsmanager_rotation(self) -> list[Finding]:
+        findings: list[Finding] = []
+        for region in self.regions:
+            sm = self.session.client("secretsmanager", region_name=region)
+            try:
+                secrets = sm.list_secrets().get("SecretList", [])
+            except Exception:  # noqa: BLE001
+                continue
+            for secret in secrets:
+                if not secret.get("RotationEnabled"):
+                    findings.append(
+                        Finding(
+                            resource=secret.get("ARN", secret.get("Name", "secret")),
+                            check="Secrets Manager secret rotation disabled",
+                            check_id="aws_secretsmanager_rotation",
+                            severity="low",
+                            remediation="Enable automatic rotation for this secret.",
+                            region=region,
+                        )
+                    )
+        return findings
+
     # ---- Drift snapshots ---------------------------------------------------
     def resource_snapshots(self) -> dict[str, dict]:
         """Normalized config for drift detection (security-sensitive resources)."""

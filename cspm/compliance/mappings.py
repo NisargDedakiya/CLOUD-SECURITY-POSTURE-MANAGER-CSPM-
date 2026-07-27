@@ -81,6 +81,44 @@ SEED_MAPPINGS: dict[str, dict[str, list[str]]] = {
         "soc2": ["CC7.1"],
         "iso27001": ["A.12.4.1"],
     },
+    "aws_s3_versioning": {"cis_aws_v2": ["2.1.3"], "soc2": ["A1.2"]},
+    "aws_s3_access_logging": {
+        "cis_aws_v2": ["3.6"],
+        "soc2": ["CC7.2"],
+        "pci_dss_v4": ["10.2.1"],
+    },
+    "aws_ebs_default_encryption": {
+        "cis_aws_v2": ["2.2.1"],
+        "soc2": ["CC6.7"],
+        "pci_dss_v4": ["3.5.1"],
+    },
+    "aws_ebs_volume_encryption": {
+        "cis_aws_v2": ["2.2.1"],
+        "soc2": ["CC6.7"],
+        "iso27001": ["A.10.1.1"],
+    },
+    "aws_iam_user_mfa": {
+        "cis_aws_v2": ["1.10"],
+        "soc2": ["CC6.1"],
+        "pci_dss_v4": ["8.4.2"],
+    },
+    "aws_cloudtrail_log_validation": {
+        "cis_aws_v2": ["3.2"],
+        "soc2": ["CC7.2"],
+        "iso27001": ["A.12.4.3"],
+    },
+    "aws_vpc_flow_logs": {
+        "cis_aws_v2": ["3.9"],
+        "soc2": ["CC7.2"],
+        "pci_dss_v4": ["10.2.1"],
+    },
+    "aws_rds_backup_retention": {"cis_aws_v2": ["2.3.2"], "soc2": ["A1.2"]},
+    "aws_rds_deletion_protection": {"soc2": ["A1.2"]},
+    "aws_secretsmanager_rotation": {
+        "cis_aws_v2": ["3.8"],
+        "soc2": ["CC6.7"],
+        "pci_dss_v4": ["3.6.1"],
+    },
 }
 
 

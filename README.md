@@ -33,7 +33,7 @@ configuration **drift** over time. It **never modifies** your cloud resources.
 | | |
 |---|---|
 | 🔌 **Connect** | AWS (STS AssumeRole + external id), GCP (service account), Azure (service principal) |
-| 🔎 **Audit** | 13+ AWS checks, plus GCP & Azure engines — IAM, S3, EC2/VPC, RDS, KMS, CloudTrail, GuardDuty… |
+| 🔎 **Audit** | 23 native AWS checks + GCP & Azure engines + **Prowler ingest** (hundreds more) — IAM/MFA, S3 (public/encryption/versioning/logging), EC2/EBS, VPC flow logs, RDS, KMS, CloudTrail, Secrets Manager, GuardDuty… |
 | 📊 **Comply** | CIS AWS v2 · SOC 2 · ISO 27001 · PCI DSS v4 — per-framework scores + evidence export |
 | 🌊 **Detect drift** | Baseline snapshots + structural deep-diff; approve or reject each change |
 | 🔐 **Secure** | AES-256-GCM encrypted credentials, RBAC, immutable audit log, request tracing |
@@ -269,8 +269,13 @@ billed through Stripe (or set manually for self-hosted/enterprise contracts).
 - **Billing endpoints**: `GET /billing/plans`, `GET /billing/subscription`
   (with live usage), `POST /billing/checkout`, `POST /billing/portal`,
   `POST /billing/webhook`.
-- **Modes**: `CSPM_BILLING_MODE=stripe` uses Stripe Checkout/Portal + webhooks;
-  `manual` (default) flips plans directly — handy for dev and negotiated deals.
+- **Modes**: `CSPM_BILLING_MODE=stripe` uses **real Stripe** Checkout, Billing
+  Portal, Customer management, invoices, and webhook sync (checkout completed,
+  subscription updated, invoice paid/failed, subscription deleted); `manual`
+  (default) flips plans directly — handy for dev and negotiated deals.
+- The Stripe path is fully covered by tests using an injected fake SDK
+  (`tests/test_stripe_gateway.py`) — going live only needs your account keys +
+  price IDs (see `docs/business/pricing-and-company.md`).
 - Plans are defined in one place — `cspm/billing/plans.py`.
 
 ## 🔐 Security model

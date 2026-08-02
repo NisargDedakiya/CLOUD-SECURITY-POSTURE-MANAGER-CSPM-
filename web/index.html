@@ -1,176 +1,182 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aegis CNAPP — Cloud-Native Application Protection Platform</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aegis Enterprise CNAPP — Cloud Native Application Protection Platform</title>
+  <link rel="stylesheet" href="app.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <!-- Login screen -->
-  <div id="login" class="login hidden">
-    <div class="login-glow"></div>
-    <div class="login-card">
-      <div class="brand">
-        <div class="logo-icon">🛡️</div>
-        <div class="brand-text">
-          <span class="brand-name">AEGIS</span>
-          <span class="brand-badge">CNAPP PRO</span>
-        </div>
-      </div>
-      <p class="tagline">Enterprise Cloud-Native Application Protection Platform</p>
 
-      <div class="seg">
-        <button class="seg-btn active" data-mode="headers">Enterprise Org</button>
-        <button class="seg-btn" data-mode="token">SSO / SAML JWT</button>
+  <!-- Login Modal Overlay -->
+  <div id="login" class="login-overlay">
+    <div class="login-box card shadow-lg">
+      <div class="brand-logo" style="font-size: 1.8rem; font-weight: 700; margin-bottom: 0.5rem;">
+        🛡️ AEGIS <span style="color:var(--accent);">ENTERPRISE CNAPP</span>
+      </div>
+      <p style="color:var(--muted); margin-bottom: 1.5rem;">Sign in to your multi-tenant cloud security workspace</p>
+      
+      <div class="segment-control" style="margin-bottom:1rem;">
+        <button class="seg-btn active" data-mode="headers">Header Auth (Org Context)</button>
+        <button class="seg-btn" data-mode="token">JWT Token</button>
         <button class="seg-btn" data-mode="apikey">API Key</button>
       </div>
 
       <form id="login-form">
         <div data-for="headers">
-          <label>Organisation ID / Workspace</label>
-          <input id="in-org" placeholder="demo-org" value="demo-org" />
-          <label>Enterprise Role</label>
+          <label>Organization ID</label>
+          <input id="in-org" type="text" value="demo-org" required />
+          <label>Role Context</label>
           <select id="in-role">
-            <option value="admin">Admin (Full Control)</option>
-            <option value="analyst">Security Engineer / Analyst</option>
+            <option value="admin">Admin (Full Access)</option>
+            <option value="analyst">Security Analyst</option>
             <option value="auditor">Auditor (Compliance Read Only)</option>
             <option value="viewer">Viewer</option>
           </select>
         </div>
+        
         <div data-for="token" class="hidden">
-          <label>Bearer Token (SSO / JWT)</label>
-          <input id="in-token" placeholder="eyJhbGci..." />
+          <label>JWT Token</label>
+          <input id="in-token" type="password" placeholder="eyJhbGciOi..." />
         </div>
+
         <div data-for="apikey" class="hidden">
           <label>API Key</label>
-          <input id="in-apikey" placeholder="cspm_..." />
+          <input id="in-apikey" type="password" placeholder="cspm_live_..." />
         </div>
-        <button type="submit" class="btn primary full glowing-btn">🚀 Enter Security Workspace</button>
-        <p class="hint">⚡ Authenticating with <code>X-Org-Id</code> tenant isolation mode.</p>
+
+        <button type="submit" class="btn primary full" style="margin-top: 1.2rem;">Sign In to Enterprise Workspace</button>
       </form>
     </div>
   </div>
 
-  <!-- App shell -->
-  <div id="app" class="app hidden">
+  <!-- Main Platform Layout -->
+  <div id="app" class="app-layout hidden">
+    <!-- Sidebar Navigation -->
     <aside class="sidebar">
-      <div class="brand">
-        <div class="logo-icon">🛡️</div>
-        <div class="brand-text">
-          <span class="brand-name">AEGIS</span>
-          <span class="version-tag">CNAPP v1.0</span>
-        </div>
+      <div class="sidebar-header">
+        <span class="brand-logo">🛡️ AEGIS</span>
+        <span id="org-badge" class="badge">demo-org</span>
       </div>
-      <nav id="nav">
-        <div class="nav-section-title">CORE SECURITY</div>
-        <a href="#/overview" data-view="overview" class="nav-link">
-          <span class="nav-icon">📊</span> <span class="nav-text">Executive Overview</span>
-        </a>
-        <a href="#/knowledge-graph" data-view="knowledge-graph" class="nav-link">
-          <span class="nav-icon">🕸️</span> <span class="nav-text">Security Knowledge Graph</span>
-        </a>
-        <a href="#/asset-tree" data-view="asset-tree" class="nav-link">
-          <span class="nav-icon">🌳</span> <span class="nav-text">Hierarchical Asset Tree</span>
+
+      <nav id="nav" class="nav-menu">
+        <div class="nav-section-title">EXECUTIVE & SECURITY</div>
+        <a href="#/overview" data-view="overview" class="nav-link active">
+          <span class="nav-icon">📊</span> <span class="nav-text">Executive Dashboard</span>
         </a>
         <a href="#/accounts" data-view="accounts" class="nav-link">
           <span class="nav-icon">🔌</span> <span class="nav-text">Cloud Accounts</span>
         </a>
+        <a href="#/assets" data-view="assets" class="nav-link">
+          <span class="nav-icon">📦</span> <span class="nav-text">Asset Explorer</span>
+        </a>
         <a href="#/findings" data-view="findings" class="nav-link">
           <span class="nav-icon">🔎</span> <span class="nav-text">Findings & AI Fixes</span>
-          <span id="nav-findings-badge" class="nav-badge hidden">0</span>
         </a>
-        <a href="#/ciem" data-view="ciem" class="nav-link">
-          <span class="nav-icon">👤</span> <span class="nav-text">CIEM Identity Risks</span>
+        <a href="#/compliance" data-view="compliance" class="nav-link">
+          <span class="nav-icon">📜</span> <span class="nav-text">Compliance Hub</span>
         </a>
+
+        <div class="nav-section-title">GRAPH & IDENTITY</div>
         <a href="#/attack-paths" data-view="attack-paths" class="nav-link">
           <span class="nav-icon">⚡</span> <span class="nav-text">Attack Path Graph</span>
         </a>
-        <a href="#/assets" data-view="assets" class="nav-link">
-          <span class="nav-icon">📦</span> <span class="nav-text">Asset Inventory</span>
+        <a href="#/knowledge-graph" data-view="knowledge-graph" class="nav-link">
+          <span class="nav-icon">🕸️</span> <span class="nav-text">Knowledge Graph</span>
+        </a>
+        <a href="#/iam" data-view="iam" class="nav-link">
+          <span class="nav-icon">👤</span> <span class="nav-text">IAM Explorer</span>
         </a>
 
-        <div class="nav-section-title">DEVSECOPS & RUNTIME CDR</div>
-        <a href="#/cdr" data-view="cdr" class="nav-link">
-          <span class="nav-icon">🚨</span> <span class="nav-text">Runtime Security & CDR</span>
-        </a>
+        <div class="nav-section-title">DEVSECOPS & RUNTIME</div>
         <a href="#/k8s" data-view="k8s" class="nav-link">
           <span class="nav-icon">☸️</span> <span class="nav-text">Kubernetes Security</span>
         </a>
         <a href="#/iac" data-view="iac" class="nav-link">
-          <span class="nav-icon">📄</span> <span class="nav-text">IaC Static Scanner</span>
+          <span class="nav-icon">🏗️</span> <span class="nav-text">Infrastructure as Code</span>
         </a>
-        <a href="#/compliance" data-view="compliance" class="nav-link">
-          <span class="nav-icon">📋</span> <span class="nav-text">Compliance & Reports</span>
+        <a href="#/cdr" data-view="cdr" class="nav-link">
+          <span class="nav-icon">🚨</span> <span class="nav-text">Runtime Security CDR</span>
         </a>
-        <a href="#/drift" data-view="drift" class="nav-link">
-          <span class="nav-icon">🌊</span> <span class="nav-text">Drift & Rollback</span>
-          <span id="nav-drift-badge" class="nav-badge warn hidden">0</span>
+
+        <div class="nav-section-title">COPILOT & REPORTS</div>
+        <a href="#/copilot" data-view="copilot" class="nav-link">
+          <span class="nav-icon">🤖</span> <span class="nav-text">AI Security Copilot</span>
         </a>
-        <a href="#/mssp" data-view="mssp" class="nav-link">
-          <span class="nav-icon">🏢</span> <span class="nav-text">MSSP Agency Portal</span>
+        <a href="#/reports" data-view="reports" class="nav-link">
+          <span class="nav-icon">📄</span> <span class="nav-text">Reports & Exporters</span>
+        </a>
+
+        <div class="nav-section-title">ADMINISTRATION & BILLING</div>
+        <a href="#/notifications" data-view="notifications" class="nav-link">
+          <span class="nav-icon">🔔</span> <span class="nav-text">Notifications & Alerts</span>
+        </a>
+        <a href="#/organizations" data-view="organizations" class="nav-link">
+          <span class="nav-icon">🏢</span> <span class="nav-text">Organizations & MSSP</span>
+        </a>
+        <a href="#/users" data-view="users" class="nav-link">
+          <span class="nav-icon">👥</span> <span class="nav-text">Users & SCIM SSO</span>
+        </a>
+        <a href="#/billing" data-view="billing" class="nav-link">
+          <span class="nav-icon">💳</span> <span class="nav-text">Billing & Licenses</span>
         </a>
         <a href="#/apikeys" data-view="apikeys" class="nav-link">
           <span class="nav-icon">🔑</span> <span class="nav-text">API Keys & SDKs</span>
         </a>
-        <a href="#/billing" data-view="billing" class="nav-link">
-          <span class="nav-icon">💳</span> <span class="nav-text">Billing & Tiers</span>
+        <a href="#/audit" data-view="audit" class="nav-link">
+          <span class="nav-icon">📝</span> <span class="nav-text">Tamper-Evident Logs</span>
+        </a>
+        <a href="#/settings" data-view="settings" class="nav-link">
+          <span class="nav-icon">⚙️</span> <span class="nav-text">Settings & White-Label</span>
+        </a>
+        <a href="#/support" data-view="support" class="nav-link">
+          <span class="nav-icon">❓</span> <span class="nav-text">Support & Health</span>
         </a>
       </nav>
 
-      <div class="sidebar-foot">
-        <div class="live-status">
-          <span class="pulse-dot"></span>
-          <span class="status-label">CNAPP Engine Active</span>
-        </div>
-        <button id="theme-toggle" class="btn ghost sm full">🌓 Toggle Theme</button>
+      <div class="sidebar-footer">
+        <button id="logout" class="btn sm secondary full">Sign Out</button>
       </div>
     </aside>
 
-    <div class="main">
+    <!-- Main Workspace Container -->
+    <main class="main-content">
+      <!-- Top Navigation Header -->
       <header class="topbar">
         <div class="topbar-left">
-          <div id="crumb" class="crumb">Overview</div>
-          <div class="global-search-trigger" id="cmd-k-trigger">
-            <span class="search-icon">🤖</span>
-            <span class="search-placeholder">Ask AI Security Copilot or search (e.g. "Show internet-facing DBs")...</span>
-            <kbd class="cmd-kbd">Ctrl K</kbd>
-          </div>
+          <span id="crumb" class="breadcrumb">DASHBOARD</span>
         </div>
-
-        <div class="top-actions">
-          <button id="quick-scan-btn" class="btn primary sm glowing-btn">⚡ Run CNAPP Audit</button>
-          <button id="demo-btn" class="btn ghost sm"><span>🚀</span> Populate Demo Workspace</button>
-          <span id="org-badge" class="badge org-badge"></span>
-          <button id="refresh" class="btn ghost sm icon-only" title="Refresh Page">↻</button>
-          <button id="logout" class="btn ghost sm danger">Sign out</button>
+        <div class="topbar-right">
+          <button id="cmd-k-trigger" class="btn search-btn">
+            🔍 Search or ask AI Copilot... <kbd>Ctrl+K</kbd>
+          </button>
+          <button id="demo-btn" class="btn sm secondary">🚀 Demo Workspace</button>
+          <button id="theme-toggle" class="btn icon-btn" title="Toggle Theme">🌙</button>
         </div>
       </header>
 
-      <main id="view" class="view"></main>
+      <!-- View Container -->
+      <div id="view" class="view-body">
+        <!-- Dynamic view content injected by app.js -->
+      </div>
+    </main>
+  </div>
+
+  <!-- Command Palette Modal -->
+  <div id="cmd-palette" class="modal-backdrop hidden">
+    <div class="cmd-box card">
+      <input id="cmd-search-input" type="text" placeholder="Type a command or query (e.g., 'show public S3 buckets')..." autofocus />
+      <div id="cmd-search-results" class="cmd-results"></div>
     </div>
   </div>
 
-  <!-- Global AI Command Palette Modal -->
-  <div id="cmd-palette" class="cmd-palette-backdrop hidden">
-    <div class="cmd-palette-modal">
-      <div class="cmd-search-input-wrap">
-        <span class="cmd-search-icon">🤖</span>
-        <input id="cmd-search-input" placeholder="Ask AI Copilot: 'Show internet-facing databases' or search resources..." autofocus />
-        <kbd class="cmd-esc-kbd">ESC</kbd>
-      </div>
-      <div id="cmd-search-results" class="cmd-search-results">
-        <div class="cmd-empty">Ask any natural language question or search assets, IAM, and compliance controls...</div>
-      </div>
-    </div>
-  </div>
-
-  <div id="toasts" class="toasts"></div>
+  <!-- Toast Notification Container -->
+  <div id="toasts" class="toast-container"></div>
   <div id="modal-root"></div>
 
-  <script src="/static/app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

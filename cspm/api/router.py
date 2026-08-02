@@ -887,4 +887,18 @@ def update_organization_settings(
     return {"status": "updated", "org_id": ctx.org_id, "settings": payload}
 
 
+@router.post("/ai/copilot/chat")
+def copilot_chat_assistant(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.ai.unified_copilot import handle_copilot_chat
+    query = payload.get("query", "Summarize posture")
+    check_id = payload.get("check_id")
+    resource_id = payload.get("resource_id")
+    return handle_copilot_chat(query, ctx.org_id, db, check_id=check_id, resource_id=resource_id)
+
+
+
 

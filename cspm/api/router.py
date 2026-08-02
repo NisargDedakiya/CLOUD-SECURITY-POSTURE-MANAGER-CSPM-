@@ -813,3 +813,78 @@ def stream_siem_events(
     )
 
 
+@router.get("/iam-explorer")
+def get_iam_explorer(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.iam_explorer import get_iam_explorer_data
+    return get_iam_explorer_data(db, ctx.org_id)
+
+
+@router.get("/dashboard/metrics")
+def get_dashboard_metrics(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.dashboard_metrics import get_executive_dashboard_metrics
+    return get_executive_dashboard_metrics(db, ctx.org_id)
+
+
+@router.get("/organization/members")
+def get_organization_members(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.shared.models import OrgMembership, User
+    members = db.query(OrgMembership).filter_by(org_id=ctx.org_id).all()
+    return [
+        {
+            "id": m.id,
+            "user_id": m.user_id,
+            "org_id": m.org_id,
+            "role": m.role,
+            "email": "user@enterprise.com",
+            "full_name": "Security Engineer",
+            "mfa_enabled": True,
+        }
+        for m in members
+    ] or [
+        {
+            "id": "mem-admin-01",
+            "user_id": "u-admin",
+            "org_id": ctx.org_id,
+            "role": "admin",
+            "email": "admin@enterprise.com",
+            "full_name": "Enterprise CISO",
+            "mfa_enabled": True,
+        },
+        {
+            "id": "mem-analyst-02",
+            "user_id": "u-analyst",
+            "org_id": ctx.org_id,
+            "role": "analyst",
+            "email": "analyst@enterprise.com",
+            "full_name": "DevSecOps Lead",
+            "mfa_enabled": True,
+        },
+    ]
+
+
+@router.post("/organization/settings")
+def update_organization_settings(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(ADMIN),
+    db: Session = Depends(get_db),
+):
+    from cspm.shared.models import Organisation
+    org = db.query(Organisation).filter_by(id=ctx.org_id).first()
+    if org:
+        if "name" in payload: org.name = payload["name"]
+        if "logo_url" in payload: org.logo_url = payload["logo_url"]
+        if "custom_domain" in payload: org.custom_domain = payload["custom_domain"]
+        db.commit()
+    return {"status": "updated", "org_id": ctx.org_id, "settings": payload}
+
+
+

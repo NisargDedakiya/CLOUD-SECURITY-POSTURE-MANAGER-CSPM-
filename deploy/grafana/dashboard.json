@@ -1,0 +1,54 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "Aegis API Request Latency (p95 / p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95 Latency" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99 Latency" }
+      ]
+    },
+    {
+      "title": "Active Cloud Security Scan Duration",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "rate(cspm_scan_duration_seconds_sum[5m]) / rate(cspm_scan_duration_seconds_count[5m])", "legendFormat": "Avg Scan Time (s)" }
+      ]
+    },
+    {
+      "title": "Critical & High Security Alerts Rate",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "sum(cspm_active_findings{severity=~'critical|high'})", "legendFormat": "Active Critical/High Findings" }
+      ]
+    },
+    {
+      "title": "Celery Background Worker Queue Depth",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "celery_queue_length{queue='critical'}", "legendFormat": "Critical Queue" },
+        { "expr": "celery_queue_length{queue='default'}", "legendFormat": "Default Queue" }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["aegis", "cnapp", "security"],
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Aegis Enterprise CNAPP Production Observability",
+  "version": 1
+}

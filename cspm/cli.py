@@ -56,6 +56,11 @@ def _print_table(findings, use_color: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     parser = argparse.ArgumentParser(prog="cspm", description="CSPM AWS audit engine")
     parser.add_argument("--demo", action="store_true", help="Use in-memory fake AWS account.")
     parser.add_argument("--role-arn", help="Cross-account role ARN (live mode).")

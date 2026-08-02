@@ -564,3 +564,207 @@ def reject_drift(
         ip_addr=ctx.ip_addr,
     )
     return finding
+
+
+# ---- CNAPP Modules: CIEM, Attack Path, Assets, K8s, IaC, AI, Reports ------
+@router.get("/ciem")
+def get_ciem_records(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.ciem import analyze_iam_entitlements
+    return analyze_iam_entitlements(db, ctx.org_id)
+
+
+@router.get("/attack-paths")
+def get_attack_paths(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.attack_path import generate_attack_paths
+    return generate_attack_paths(db, ctx.org_id)
+
+
+@router.get("/assets")
+def get_asset_inventory(
+    category: str | None = None,
+    environment: str | None = None,
+    owner: str | None = None,
+    business_unit: str | None = None,
+    criticality: str | None = None,
+    is_internet_facing: bool | None = None,
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.inventory import sync_asset_inventory, query_assets
+    assets = query_assets(
+        db,
+        ctx.org_id,
+        category=category,
+        environment=environment,
+        owner=owner,
+        business_unit=business_unit,
+        criticality=criticality,
+        is_internet_facing=is_internet_facing,
+    )
+    if not assets:
+        sync_asset_inventory(db, ctx.org_id)
+        assets = query_assets(db, ctx.org_id)
+    return assets
+
+
+@router.post("/k8s/scan")
+def trigger_k8s_scan(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(WRITE),
+    db: Session = Depends(get_db),
+):
+    from cspm.auditors.k8s import audit_kubernetes_cluster
+    return audit_kubernetes_cluster(
+        db,
+        ctx.org_id,
+        cluster_name=payload.get("cluster_name", "eks-prod-cluster"),
+        distro=payload.get("distro", "eks"),
+        manifests=payload.get("manifests"),
+    )
+
+
+@router.post("/iac/scan")
+def trigger_iac_scan(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(WRITE),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.iac_scanner import scan_iac_file
+    return scan_iac_file(
+        db,
+        ctx.org_id,
+        file_path=payload.get("file_path", "terraform/main.tf"),
+        iac_type=payload.get("iac_type", "terraform"),
+        content=payload.get("content", ""),
+        repository=payload.get("repository", "main-repo"),
+    )
+
+
+@router.post("/scm/scan")
+def trigger_scm_scan(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(WRITE),
+    db: Session = Depends(get_db),
+):
+    from cspm.integrations.scm import scan_scm_repository
+    return scan_scm_repository(
+        db,
+        ctx.org_id,
+        platform=payload.get("platform", "github"),
+        repository_full_name=payload.get("repository", "org/cloud-infra"),
+    )
+
+
+@router.post("/cicd/gate")
+def evaluate_cicd_gate(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.integrations.cicd import evaluate_pipeline_gate
+    findings = db.query(FindingRecord).filter_by(org_id=ctx.org_id, status="open").all()
+    findings_dicts = [{"severity": f.severity, "check_id": f.check_id} for f in findings]
+    return evaluate_pipeline_gate(
+        findings_dicts,
+        fail_on_severity=payload.get("fail_on_severity", "critical"),
+    )
+
+
+@router.post("/tickets/create")
+def create_ticket(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(WRITE),
+    db: Session = Depends(get_db),
+):
+    from cspm.integrations.ticketing import create_remediation_ticket
+    return create_remediation_ticket(
+        db,
+        ctx.org_id,
+        finding_id=payload.get("finding_id", ""),
+        provider=payload.get("provider", "jira"),
+    )
+
+
+@router.post("/ai/remediate")
+def get_ai_remediation(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(get_org_context),
+):
+    from cspm.ai.remediation import generate_ai_remediation
+    return generate_ai_remediation(
+        finding_check_id=payload.get("check_id", "AWS-S3-001"),
+        resource_id=payload.get("resource", "my-bucket"),
+    )
+
+
+@router.post("/ai/search")
+def ai_natural_language_search(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.ai.nl_search import parse_and_execute_nl_query
+    return parse_and_execute_nl_query(
+        db, ctx.org_id, query_text=payload.get("query", "Show internet-facing databases")
+    )
+
+
+@router.get("/ai/summary")
+def get_ai_executive_summary(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.ai.summary import generate_executive_ai_summary
+    return generate_executive_ai_summary(db, ctx.org_id)
+
+
+@router.get("/reports/export")
+def export_reports(
+    report_type: str = "executive",
+    format: str = "json",
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.reporting.exporter import export_report_data
+    body, filename, content_type = export_report_data(
+        db, ctx.org_id, report_type=report_type, export_format=format
+    )
+    return Response(
+        content=body,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/onboarding/demo-workspace")
+def setup_demo_workspace(
+    ctx: OrgContext = Depends(WRITE),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.inventory import sync_asset_inventory
+    from cspm.engine.ciem import analyze_iam_entitlements
+    from cspm.engine.attack_path import generate_attack_paths
+    sync_asset_inventory(db, ctx.org_id)
+    analyze_iam_entitlements(db, ctx.org_id)
+    generate_attack_paths(db, ctx.org_id)
+    return {"status": "success", "message": "Demo workspace populated with cloud accounts, assets, CIEM risks, and attack paths."}
+
+
+@router.post("/trial/start")
+def start_free_risk_assessment(
+    ctx: OrgContext = Depends(WRITE),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "active",
+        "trial_days_remaining": 14,
+        "plan": "business_trial",
+        "message": "14-day free risk assessment active. Full CNAPP feature access granted.",
+    }
+

@@ -128,7 +128,7 @@ def test_list_plans(free_client):
     assert r.status_code == 200
     body = r.json()
     assert body["current_plan"] == "free"
-    assert {p["id"] for p in body["plans"]} == {"free", "starter", "pro", "enterprise"}
+    assert {p["id"] for p in body["plans"]} == {"free", "starter", "pro", "business", "enterprise", "mssp"}
 
 
 def test_free_org_blocked_from_second_account(free_client):

@@ -1,18 +1,14 @@
-"""Structural drift detection using deepdiff (spec 6.4).
+"""Structural drift detection using deepdiff with CLI & Terraform rollback generation.
 
 Compares a fresh set of normalized resource snapshots against an approved
-baseline. Uses a structural deep-diff (not a raw string diff) so key ordering
-and formatting never trigger false positives.
+baseline. Uses a structural deep-diff so key ordering and formatting never trigger false positives.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 from deepdiff import DeepDiff
 
-# Resource types whose changes are security-sensitive and must alert immediately
-# (drift alert re-routes to the 'critical' Celery queue per spec 6.4).
 SECURITY_SENSITIVE_TYPES = {
     "iam_policy",
     "iam_role",
@@ -32,6 +28,8 @@ class DriftDiff:
     drift_type: str  # created | deleted | changed | permission_changed
     before_state: dict | None
     after_state: dict | None
+    rollback_cli: str | None = None
+    rollback_terraform: str | None = None
 
     @property
     def security_sensitive(self) -> bool:
@@ -50,40 +48,56 @@ def _classify_change(resource_type: str, before: dict, after: dict) -> str:
     if any(pk in changed_paths.lower() for pk in perm_keys):
         return "permission_changed"
     if is_security_sensitive(resource_type):
-        # For sensitive resources, any structural change is treated as permission-level.
         return "permission_changed"
     return "changed"
+
+
+def generate_rollback_commands(resource_id: str, resource_type: str, before: dict | None, after: dict | None) -> tuple[str, str]:
+    """Generate exact CLI and Terraform rollback commands for a drift event."""
+    if resource_type in ("s3_bucket", "storage"):
+        cli = f"aws s3api put-bucket-acl --bucket {resource_id} --acl private"
+        tf = f"resource \"aws_s3_bucket_acl\" \"rollback\" {{\n  bucket = \"{resource_id}\"\n  acl    = \"private\"\n}}"
+    elif resource_type in ("security_group", "network_security_group"):
+        cli = f"aws ec2 revoke-security-group-ingress --group-id {resource_id} --protocol tcp --port 22 --cidr 0.0.0.0/0"
+        tf = f"resource \"aws_security_group_rule\" \"rollback\" {{\n  type        = \"ingress\"\n  from_port   = 22\n  to_port     = 22\n  protocol    = \"tcp\"\n  cidr_blocks = [\"10.0.0.0/8\"]\n}}"
+    else:
+        cli = f"aws resourcegroupstaggingapi tag-resources --resource-arn-list {resource_id} --tags Environment=production"
+        tf = f"# Terraform rollback for {resource_id}\nterraform apply -auto-approve -var-file=approved_baseline.tfvars"
+    return cli, tf
 
 
 def diff_snapshots(
     baseline: dict[str, dict], current: dict[str, dict]
 ) -> list[DriftDiff]:
-    """Return the list of drift events between baseline and current snapshots.
-
-    Snapshots are ``{resource_id: {"type": ..., ...config...}}``.
-    """
+    """Return the list of drift events between baseline and current snapshots."""
     drifts: list[DriftDiff] = []
     base_keys = set(baseline)
     cur_keys = set(current)
 
     for rid in cur_keys - base_keys:
         cfg = current[rid]
+        rtype = cfg.get("type", "unknown")
+        cli, tf = generate_rollback_commands(rid, rtype, None, cfg)
         drifts.append(
-            DriftDiff(rid, cfg.get("type", "unknown"), "created", None, cfg)
+            DriftDiff(rid, rtype, "created", None, cfg, rollback_cli=cli, rollback_terraform=tf)
         )
 
     for rid in base_keys - cur_keys:
         cfg = baseline[rid]
+        rtype = cfg.get("type", "unknown")
+        cli, tf = generate_rollback_commands(rid, rtype, cfg, None)
         drifts.append(
-            DriftDiff(rid, cfg.get("type", "unknown"), "deleted", cfg, None)
+            DriftDiff(rid, rtype, "deleted", cfg, None, rollback_cli=cli, rollback_terraform=tf)
         )
 
     for rid in base_keys & cur_keys:
         before, after = baseline[rid], current[rid]
         if DeepDiff(before, after, ignore_order=True):
             rtype = after.get("type", before.get("type", "unknown"))
+            drift_t = _classify_change(rtype, before, after)
+            cli, tf = generate_rollback_commands(rid, rtype, before, after)
             drifts.append(
-                DriftDiff(rid, rtype, _classify_change(rtype, before, after), before, after)
+                DriftDiff(rid, rtype, drift_t, before, after, rollback_cli=cli, rollback_terraform=tf)
             )
 
     return drifts

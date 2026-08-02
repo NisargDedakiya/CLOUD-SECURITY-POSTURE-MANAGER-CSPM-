@@ -3,43 +3,54 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CSPM — Cloud Security Posture Manager</title>
+  <title>Aegis CNAPP — Cloud-Native Application Protection Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
   <!-- Login screen -->
   <div id="login" class="login hidden">
+    <div class="login-glow"></div>
     <div class="login-card">
-      <div class="brand"><span class="logo">🛡️</span> <span>CSPM</span></div>
-      <p class="tagline">Cloud Security Posture Manager</p>
+      <div class="brand">
+        <div class="logo-icon">🛡️</div>
+        <div class="brand-text">
+          <span class="brand-name">AEGIS</span>
+          <span class="brand-badge">CNAPP PRO</span>
+        </div>
+      </div>
+      <p class="tagline">Enterprise Cloud-Native Application Protection Platform</p>
 
       <div class="seg">
-        <button class="seg-btn active" data-mode="headers">Dev / Org</button>
-        <button class="seg-btn" data-mode="token">Token</button>
+        <button class="seg-btn active" data-mode="headers">Enterprise Org</button>
+        <button class="seg-btn" data-mode="token">SSO / SAML JWT</button>
         <button class="seg-btn" data-mode="apikey">API Key</button>
       </div>
 
       <form id="login-form">
         <div data-for="headers">
-          <label>Organisation ID</label>
+          <label>Organisation ID / Workspace</label>
           <input id="in-org" placeholder="demo-org" value="demo-org" />
-          <label>Role</label>
+          <label>Enterprise Role</label>
           <select id="in-role">
-            <option value="admin">admin</option>
-            <option value="analyst">analyst</option>
-            <option value="viewer">viewer</option>
+            <option value="admin">Admin (Full Control)</option>
+            <option value="analyst">Security Engineer / Analyst</option>
+            <option value="auditor">Auditor (Compliance Read Only)</option>
+            <option value="viewer">Viewer</option>
           </select>
         </div>
         <div data-for="token" class="hidden">
-          <label>Bearer token (JWT)</label>
+          <label>Bearer Token (SSO / JWT)</label>
           <input id="in-token" placeholder="eyJhbGci..." />
         </div>
         <div data-for="apikey" class="hidden">
-          <label>API key</label>
+          <label>API Key</label>
           <input id="in-apikey" placeholder="cspm_..." />
         </div>
-        <button type="submit" class="btn primary full">Sign in</button>
-        <p class="hint">Backend running with <code>CSPM_AUTH_MODE=headers</code> accepts Org/Role directly.</p>
+        <button type="submit" class="btn primary full glowing-btn">🚀 Enter Security Workspace</button>
+        <p class="hint">⚡ Authenticating with <code>X-Org-Id</code> tenant isolation mode.</p>
       </form>
     </div>
   </div>
@@ -47,31 +58,104 @@
   <!-- App shell -->
   <div id="app" class="app hidden">
     <aside class="sidebar">
-      <div class="brand"><span class="logo">🛡️</span> <span>CSPM</span></div>
+      <div class="brand">
+        <div class="logo-icon">🛡️</div>
+        <div class="brand-text">
+          <span class="brand-name">AEGIS</span>
+          <span class="version-tag">CNAPP v1.0</span>
+        </div>
+      </div>
       <nav id="nav">
-        <a href="#/overview" data-view="overview"><span>📊</span> Overview</a>
-        <a href="#/accounts" data-view="accounts"><span>🔌</span> Cloud Accounts</a>
-        <a href="#/findings" data-view="findings"><span>🔎</span> Findings</a>
-        <a href="#/compliance" data-view="compliance"><span>📋</span> Compliance</a>
-        <a href="#/drift" data-view="drift"><span>🌊</span> Drift</a>
-        <a href="#/apikeys" data-view="apikeys"><span>🔑</span> API Keys</a>
-        <a href="#/billing" data-view="billing"><span>💳</span> Billing</a>
+        <div class="nav-section-title">CORE SECURITY</div>
+        <a href="#/overview" data-view="overview" class="nav-link">
+          <span class="nav-icon">📊</span> <span class="nav-text">Executive Overview</span>
+        </a>
+        <a href="#/accounts" data-view="accounts" class="nav-link">
+          <span class="nav-icon">🔌</span> <span class="nav-text">Cloud Accounts</span>
+        </a>
+        <a href="#/findings" data-view="findings" class="nav-link">
+          <span class="nav-icon">🔎</span> <span class="nav-text">Findings & AI Fixes</span>
+          <span id="nav-findings-badge" class="nav-badge hidden">0</span>
+        </a>
+        <a href="#/ciem" data-view="ciem" class="nav-link">
+          <span class="nav-icon">👤</span> <span class="nav-text">CIEM Identity Risks</span>
+        </a>
+        <a href="#/attack-paths" data-view="attack-paths" class="nav-link">
+          <span class="nav-icon">🕸️</span> <span class="nav-text">Attack Path Graph</span>
+        </a>
+        <a href="#/assets" data-view="assets" class="nav-link">
+          <span class="nav-icon">📦</span> <span class="nav-text">Asset Inventory</span>
+        </a>
+
+        <div class="nav-section-title">DEVSECOPS & PLATFORM</div>
+        <a href="#/k8s" data-view="k8s" class="nav-link">
+          <span class="nav-icon">☸️</span> <span class="nav-text">Kubernetes Security</span>
+        </a>
+        <a href="#/iac" data-view="iac" class="nav-link">
+          <span class="nav-icon">📄</span> <span class="nav-text">IaC Static Scanner</span>
+        </a>
+        <a href="#/compliance" data-view="compliance" class="nav-link">
+          <span class="nav-icon">📋</span> <span class="nav-text">Compliance & Reports</span>
+        </a>
+        <a href="#/drift" data-view="drift" class="nav-link">
+          <span class="nav-icon">🌊</span> <span class="nav-text">Drift & Rollback</span>
+          <span id="nav-drift-badge" class="nav-badge warn hidden">0</span>
+        </a>
+        <a href="#/mssp" data-view="mssp" class="nav-link">
+          <span class="nav-icon">🏢</span> <span class="nav-text">MSSP Agency Portal</span>
+        </a>
+        <a href="#/apikeys" data-view="apikeys" class="nav-link">
+          <span class="nav-icon">🔑</span> <span class="nav-text">API Keys & SDKs</span>
+        </a>
+        <a href="#/billing" data-view="billing" class="nav-link">
+          <span class="nav-icon">💳</span> <span class="nav-text">Billing & Tiers</span>
+        </a>
       </nav>
+
       <div class="sidebar-foot">
-        <button id="theme-toggle" class="btn ghost sm">🌓 Theme</button>
+        <div class="live-status">
+          <span class="pulse-dot"></span>
+          <span class="status-label">CNAPP Engine Active</span>
+        </div>
+        <button id="theme-toggle" class="btn ghost sm full">🌓 Toggle Theme</button>
       </div>
     </aside>
 
     <div class="main">
       <header class="topbar">
-        <div id="crumb" class="crumb">Overview</div>
+        <div class="topbar-left">
+          <div id="crumb" class="crumb">Overview</div>
+          <div class="global-search-trigger" id="cmd-k-trigger">
+            <span class="search-icon">🤖</span>
+            <span class="search-placeholder">Ask AI Security Copilot or search (e.g. "Show internet-facing DBs")...</span>
+            <kbd class="cmd-kbd">Ctrl K</kbd>
+          </div>
+        </div>
+
         <div class="top-actions">
-          <span id="org-badge" class="badge"></span>
-          <button id="refresh" class="btn ghost sm">↻ Refresh</button>
-          <button id="logout" class="btn ghost sm">Sign out</button>
+          <button id="quick-scan-btn" class="btn primary sm glowing-btn">⚡ Run CNAPP Audit</button>
+          <button id="demo-btn" class="btn ghost sm"><span>🚀</span> Populate Demo Workspace</button>
+          <span id="org-badge" class="badge org-badge"></span>
+          <button id="refresh" class="btn ghost sm icon-only" title="Refresh Page">↻</button>
+          <button id="logout" class="btn ghost sm danger">Sign out</button>
         </div>
       </header>
+
       <main id="view" class="view"></main>
+    </div>
+  </div>
+
+  <!-- Global AI Command Palette Modal -->
+  <div id="cmd-palette" class="cmd-palette-backdrop hidden">
+    <div class="cmd-palette-modal">
+      <div class="cmd-search-input-wrap">
+        <span class="cmd-search-icon">🤖</span>
+        <input id="cmd-search-input" placeholder="Ask AI Copilot: 'Show internet-facing databases' or search resources..." autofocus />
+        <kbd class="cmd-esc-kbd">ESC</kbd>
+      </div>
+      <div id="cmd-search-results" class="cmd-search-results">
+        <div class="cmd-empty">Ask any natural language question or search assets, IAM, and compliance controls...</div>
+      </div>
     </div>
   </div>
 

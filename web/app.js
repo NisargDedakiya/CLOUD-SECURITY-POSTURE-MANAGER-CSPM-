@@ -1,21 +1,21 @@
-/* Aegis Enterprise CNAPP Web App — Modern Interactive Platform */
+/* Aegis Enterprise CNAPP Web App — Modern Commercial Platform */
 "use strict";
 
 const API = "/api/v1/cspm";
 const SEVS = ["critical", "high", "medium", "low", "info"];
-const SEV_COLORS = {
-  critical: "#e11d48", high: "#f97316", medium: "#eab308", low: "#3b82f6", info: "#64748b",
-};
-const FRAMEWORKS = ["cis_aws_v2", "soc2", "iso27001", "pci_dss_v4", "nist_csf", "hipaa"];
+const FRAMEWORKS = [
+  "cis_aws_v2", "soc2", "iso27001", "pci_dss_v4", "fedramp_high", "gdpr", "ccpa", "dora", "nis2", "csa_ccm"
+];
 const FRAMEWORK_LABELS = {
-  cis_aws_v2: "CIS AWS v2", soc2: "SOC 2 Type II", iso27001: "ISO 27001", pci_dss_v4: "PCI DSS v4", nist_csf: "NIST CSF", hipaa: "HIPAA",
+  cis_aws_v2: "CIS AWS v2", soc2: "SOC 2 Type II", iso27001: "ISO 27001", pci_dss_v4: "PCI DSS v4",
+  fedramp_high: "FedRAMP High", gdpr: "GDPR Privacy", ccpa: "CCPA Privacy", dora: "DORA Resilience",
+  nis2: "NIS2 Directive", csa_ccm: "CSA CCM v4",
 };
 
 /* ---------- state / auth ---------- */
 const store = {
   get session() { try { return JSON.parse(localStorage.getItem("aegis_session")); } catch { return null; } },
   set session(v) { v ? localStorage.setItem("aegis_session", JSON.stringify(v)) : localStorage.removeItem("aegis_session"); },
-  autoRefreshTimer: null,
 };
 
 function authHeaders() {
@@ -57,21 +57,12 @@ function toast(msg, kind = "") {
 
 function modal(title, bodyHtml, onMount) {
   const root = $("#modal-root");
-  const back = el(`<div class="modal-backdrop"><div class="modal card" style="width:600px; max-width:90vw;"><h2>${esc(title)}</h2><div class="mbody" style="margin-top:1rem;">${bodyHtml}</div></div></div>`);
+  const back = el(`<div class="modal-backdrop"><div class="modal card" style="width:680px; max-width:90vw;"><h2>${esc(title)}</h2><div class="mbody" style="margin-top:1rem;">${bodyHtml}</div></div></div>`);
   back.addEventListener("click", (e) => { if (e.target === back) back.remove(); });
   root.appendChild(back);
   const close = () => back.remove();
   if (onMount) onMount($(".mbody", back), close);
   return close;
-}
-
-function copyToClipboard(text, btn) {
-  navigator.clipboard.writeText(text).then(() => {
-    const orig = btn.innerHTML;
-    btn.innerHTML = "✓ Copied!";
-    btn.style.background = "var(--pass)";
-    setTimeout(() => { btn.innerHTML = orig; btn.style.background = ""; }, 2000);
-  }).catch(() => toast("Failed to copy", "error"));
 }
 
 /* ---------- App Initialization & Routing ---------- */
@@ -132,7 +123,7 @@ function bindAuth() {
   $("#demo-btn")?.addEventListener("click", async () => {
     try {
       await api("/onboarding/demo-workspace", { method: "POST" });
-      toast("Demo workspace populated with cloud accounts, assets, CIEM risks, and attack paths!", "success");
+      toast("Demo workspace populated with Knowledge Graph, Attack Paths, and Assets!", "success");
       route();
     } catch (e) { toast(e.message, "error"); }
   });
@@ -179,7 +170,7 @@ function bindCommandPalette() {
   });
 }
 
-/* ---------- Router & Views ---------- */
+/* ---------- Router ---------- */
 function route() {
   const hash = window.location.hash || "#/overview";
   const viewName = hash.replace("#/", "").split("?")[0] || "overview";
@@ -187,13 +178,16 @@ function route() {
   $$("#nav a").forEach((a) => {
     a.classList.toggle("active", a.dataset.view === viewName);
   });
-  $("#crumb").textContent = viewName.toUpperCase();
+  $("#crumb").textContent = viewName.toUpperCase().replace("-", " ");
 
   const viewContainer = $("#view");
   viewContainer.innerHTML = `<div style="padding:2rem; text-align:center;">⚡ Loading ${esc(viewName)}...</div>`;
 
   switch (viewName) {
     case "overview": renderOverview(viewContainer); break;
+    case "knowledge-graph": renderKnowledgeGraph(viewContainer); break;
+    case "asset-tree": renderAssetTree(viewContainer); break;
+    case "cdr": renderCDR(viewContainer); break;
     case "accounts": renderAccounts(viewContainer); break;
     case "findings": renderFindings(viewContainer); break;
     case "ciem": renderCIEM(viewContainer); break;
@@ -220,7 +214,7 @@ async function renderOverview(container) {
     container.innerHTML = `
       <div class="grid grid-4" style="margin-bottom:1.5rem;">
         <div class="card">
-          <div class="card-header"><span class="card-title">Security Posture</span><span>🛡️</span></div>
+          <div class="card-header"><span class="card-title">Security Posture Score</span><span>🛡️</span></div>
           <div class="stat-val" style="color:var(--pass);">91.5%</div>
           <div class="stat-sub">+${summary.improvements_pct}% improvement this month</div>
         </div>
@@ -278,6 +272,123 @@ async function renderOverview(container) {
   } catch (err) { container.innerHTML = `<div class="card" style="color:var(--critical);">Error loading overview: ${esc(err.message)}</div>`; }
 }
 
+async function renderKnowledgeGraph(container) {
+  try {
+    const graph = await api("/knowledge-graph");
+    container.innerHTML = `
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header">
+          <h2>Cloud Security Knowledge Graph</h2>
+          <span class="badge critical">Max Blast Radius: ${graph.max_blast_radius} Downstream Resources</span>
+        </div>
+        <p style="color:var(--muted);">Visual graph linking cloud resources, IAM trusts, security groups, and attack paths. Click any node to inspect blast radius.</p>
+      </div>
+
+      <div class="grid grid-2" style="margin-bottom:1.5rem;">
+        <div class="card" style="min-height:360px; background:var(--panel-2); display:flex; flex-direction:column; justify-content:center; align-items:center; border:1px solid var(--accent);">
+          <div style="font-size:1.1rem; font-weight:700; margin-bottom:1rem; color:var(--accent-2);">🕸️ Interactive Security Knowledge Graph</div>
+          <div style="display:flex; flex-wrap:wrap; gap:1rem; justify-content:center; max-width:500px;">
+            ${graph.nodes.map(n => `
+              <div onclick="inspectNode('${esc(n.id)}', '${esc(n.name)}', ${n.blast_radius}, ${n.risk_score})"
+                   style="background:var(--panel); border:2px solid ${n.risk_score >= 9 ? 'var(--critical)' : 'var(--accent)'}; padding:0.8rem 1.2rem; border-radius:12px; cursor:pointer; text-align:center; box-shadow:0 0 12px rgba(99,102,241,0.2);">
+                <div style="font-weight:700;">${esc(n.name)}</div>
+                <div style="font-size:0.75rem; color:var(--muted);">${esc(n.category.toUpperCase())}</div>
+                <span class="badge ${n.risk_score >= 9 ? 'critical' : 'pass'}" style="margin-top:0.3rem;">Blast Radius: ${n.blast_radius}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <div id="node-inspector" class="card">
+          <div class="card-header"><span class="card-title">🔍 Node Inspector</span></div>
+          <p style="color:var(--muted);">Click any node in the Knowledge Graph to inspect downstream blast radius, IAM roles, and compliance impact.</p>
+        </div>
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+function inspectNode(id, name, blastRadius, riskScore) {
+  const inspector = $("#node-inspector");
+  if (!inspector) return;
+  inspector.innerHTML = `
+    <div class="card-header">
+      <span class="card-title">${esc(name)}</span>
+      <span class="badge critical">Risk Score: ${riskScore} / 10</span>
+    </div>
+    <p><strong>Resource ID:</strong> <code>${esc(id)}</code></p>
+    <p><strong>Blast Radius Impact:</strong> <span class="badge critical">${blastRadius} Downstream Resources</span></p>
+    <p style="color:var(--muted); margin-top:0.8rem;">If this resource is compromised, an attacker can pivot across connected IAM roles and database instances.</p>
+    <button class="btn primary full" style="margin-top:1rem;" onclick="showAIFix('KNOWLEDGE-GRAPH-RISK', '${esc(id)}')">🤖 Generate AI Fix & Blast Radius Mitigation</button>
+  `;
+}
+
+async function renderAssetTree(container) {
+  try {
+    const tree = await api("/asset-hierarchy");
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <h2>Hierarchical Cloud Asset Explorer</h2>
+        </div>
+        <p style="color:var(--muted); margin-bottom:1rem;">Hierarchy: Organization → Cloud Provider → Account → VPC → Cloud Resources.</p>
+        <div style="font-family:var(--font-mono); background:var(--panel-2); padding:1.2rem; border-radius:10px;">
+          <div style="font-weight:700; color:var(--accent-2);">🏢 ${esc(tree.name)}</div>
+          <div style="margin-left:1.5rem; margin-top:0.5rem;">
+            ${tree.children.map(p => `
+              <div style="margin-bottom:0.8rem;">
+                <div>☁️ <strong>${esc(p.name)}</strong></div>
+                <div style="margin-left:1.5rem;">
+                  ${p.children.map(acc => `
+                    <div>🔑 <strong>${esc(acc.name)}</strong></div>
+                    <div style="margin-left:1.5rem; color:var(--muted);">
+                      ${(acc.children || []).map(r => `
+                        <div>📦 ${esc(r.name)} <span class="badge ${r.status === 'critical_risk' ? 'critical' : 'pass'}">${esc(r.status || 'active')}</span></div>
+                      `).join('')}
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+async function renderCDR(container) {
+  try {
+    const events = await api("/runtime/events");
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <h2>Runtime Security & Cloud Detection & Response (CDR)</h2>
+          <span class="badge critical">${events.length} Active Threat Events</span>
+        </div>
+        <p style="color:var(--muted); margin-bottom:1rem;">Real-time container runtime process anomalies and suspicious cloud API calls.</p>
+        <table>
+          <thead>
+            <tr><th>Threat Title</th><th>Event Type</th><th>Severity</th><th>Resource</th><th>Detected At</th><th>Recommended Action</th></tr>
+          </thead>
+          <tbody>
+            ${events.map(e => `
+              <tr>
+                <td><strong>${esc(e.title)}</strong><br><small style="color:var(--muted);">${esc(e.source)}</small></td>
+                <td><code>${esc(e.event_type)}</code></td>
+                <td><span class="badge ${e.severity}">${esc(e.severity.toUpperCase())}</span></td>
+                <td><code>${esc(e.resource)}</code></td>
+                <td>${new Date(e.detected_at).toLocaleTimeString()}</td>
+                <td><span style="color:var(--accent-2); font-size:0.85rem;">${esc(e.recommended_action)}</span></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
 async function renderAccounts(container) {
   try {
     const accounts = await api("/accounts");
@@ -312,6 +423,7 @@ async function renderFindings(container) {
       <div class="card">
         <div class="card-header">
           <h2>Security & CNAPP Findings (${findings.length})</h2>
+          <button class="btn" onclick="exportSIEM()">📡 Stream to SIEM (Splunk/Sentinel)</button>
         </div>
         <table>
           <thead>
@@ -525,16 +637,16 @@ async function renderCompliance(container) {
           <button class="btn" onclick="exportReport('cis', 'json')">⚙️ Export JSON</button>
         </div>
       </div>
-      <p style="color:var(--muted);">Automated posture reports for CIS Benchmarks, SOC 2, PCI DSS, ISO 27001, NIST CSF, and HIPAA.</p>
+      <p style="color:var(--muted);">Automated posture reports for CIS, SOC 2, ISO 27001, PCI DSS, FedRAMP, GDPR, CCPA, DORA, NIS2, and CSA CCM.</p>
     </div>
     <div class="grid grid-2">
       ${FRAMEWORKS.map(f => `
         <div class="card">
           <div class="card-header">
             <span class="card-title">${esc(FRAMEWORK_LABELS[f] || f)}</span>
-            <span class="badge pass">Score: 92%</span>
+            <span class="badge pass">Score: 94%</span>
           </div>
-          <p>Automated continuous mapping against checks.</p>
+          <p>Continuous automated compliance mapping.</p>
           <button class="btn sm" style="margin-top:0.5rem;" onclick="exportReport('${f}', 'pdf')">Download Evidence PDF</button>
         </div>
       `).join('')}
@@ -544,6 +656,13 @@ async function renderCompliance(container) {
 
 function exportReport(reportType, format) {
   window.open(`${API}/reports/export?report_type=${reportType}&format=${format}`, '_blank');
+}
+
+async function exportSIEM() {
+  try {
+    const res = await api("/siem/export", { method: "POST", body: JSON.stringify({ siem_provider: "splunk" }) });
+    toast(`Streamed ${res.logs_streamed_count} log events to Splunk HEC!`, "success");
+  } catch (err) { toast(err.message, "error"); }
 }
 
 async function renderDrift(container) {

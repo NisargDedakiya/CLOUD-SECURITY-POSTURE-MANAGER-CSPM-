@@ -768,3 +768,48 @@ def start_free_risk_assessment(
         "message": "14-day free risk assessment active. Full CNAPP feature access granted.",
     }
 
+
+# ---- Commercial Upgrade: Knowledge Graph, Asset Hierarchy, CDR, SIEM ------
+@router.get("/knowledge-graph")
+def get_knowledge_graph(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.knowledge_graph import build_cloud_knowledge_graph
+    return build_cloud_knowledge_graph(db, ctx.org_id)
+
+
+@router.get("/asset-hierarchy")
+def get_asset_hierarchy_tree(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.knowledge_graph import get_hierarchical_asset_tree
+    return get_hierarchical_asset_tree(db, ctx.org_id)
+
+
+@router.get("/runtime/events")
+def get_runtime_threat_events(
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.engine.runtime_cdr import get_runtime_cdr_events
+    return get_runtime_cdr_events(db, ctx.org_id)
+
+
+@router.post("/siem/export")
+def stream_siem_events(
+    payload: dict = Body(...),
+    ctx: OrgContext = Depends(get_org_context),
+    db: Session = Depends(get_db),
+):
+    from cspm.integrations.siem import dispatch_siem_stream
+    findings = db.query(FindingRecord).filter_by(org_id=ctx.org_id).all()
+    findings_dicts = [{"check_id": f.check_id, "severity": f.severity, "resource": f.resource, "description": f.description} for f in findings]
+    return dispatch_siem_stream(
+        findings_dicts,
+        siem_provider=payload.get("siem_provider", "splunk"),
+        hec_endpoint_url=payload.get("hec_endpoint_url"),
+    )
+
+

@@ -1,7 +1,7 @@
-"""Subscription plans, features, and quotas.
+"""Subscription plans, features, and quotas for Aegis CNAPP.
 
-The plan catalog is the single source of truth for what each tier can do.
-Feature gating and usage limits everywhere else read from here.
+Defines the 6 pricing tiers: Community (Free), Starter ($49), Professional ($299),
+Business ($999), Enterprise (Custom), and MSSP (Custom).
 """
 
 from __future__ import annotations
@@ -9,20 +9,26 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 
-UNLIMITED = -1  # sentinel for "no limit"
+UNLIMITED = -1
 
 
 class Feature(str, enum.Enum):
-    MULTI_CLOUD = "multi_cloud"          # connect GCP/Azure (AWS always allowed)
-    DRIFT = "drift"                      # continuous drift detection
-    INTEGRATIONS = "integrations"        # Slack/webhook/PagerDuty
-    EVIDENCE_EXPORT = "evidence_export"  # auditor evidence
+    MULTI_CLOUD = "multi_cloud"          # connect AWS/GCP/Azure/K8s
+    DRIFT = "drift"                      # continuous drift detection & rollback
+    INTEGRATIONS = "integrations"        # Slack/Teams/Discord/PagerDuty/Opsgenie
+    EVIDENCE_EXPORT = "evidence_export"  # auditor evidence & multi-format reports
     TRENDS = "trends"                    # compliance trend history
-    API_KEYS = "api_keys"               # programmatic access
-    SSO_SCIM = "sso_scim"               # OIDC/SAML + SCIM provisioning
-    PROWLER = "prowler"                 # Prowler check breadth
+    API_KEYS = "api_keys"               # programmatic REST & GraphQL access
+    SSO_SCIM = "sso_scim"               # SAML 2.0/Entra/Okta/Auth0 + SCIM
+    PROWLER = "prowler"                 # deep check breadth
     AUTO_REMEDIATION = "auto_remediation"
     PRIORITY_SUPPORT = "priority_support"
+    CIEM = "ciem"                       # Cloud Infrastructure Entitlement Management
+    ATTACK_PATH = "attack_path"         # Attack Path Analysis
+    IAC_SCANNING = "iac_scanning"       # Infrastructure as Code Static Analysis
+    K8S_SECURITY = "k8s_security"       # Kubernetes Pod Security & RBAC
+    AI_COPILOT = "ai_copilot"           # AI Security Copilot Remediation & NL Search
+    MSSP_PORTAL = "mssp_portal"         # Multi-client Agency Portal & White-labeling
 
 
 @dataclass(frozen=True)
@@ -30,11 +36,14 @@ class Plan:
     id: str
     name: str
     price_usd_month: int
+    price_usd_annual: int
     blurb: str
+    target_audience: str
     max_accounts: int
     max_scans_per_month: int
     max_api_keys: int
-    frameworks: tuple[str, ...]          # ("all",) means every framework
+    max_seats: int
+    frameworks: tuple[str, ...]
     features: frozenset[Feature] = field(default_factory=frozenset)
 
     def has(self, feature: Feature) -> bool:
@@ -44,40 +53,61 @@ class Plan:
         return "all" in self.frameworks or framework in self.frameworks
 
 
-_ALL = (
-    Feature.MULTI_CLOUD, Feature.DRIFT, Feature.INTEGRATIONS, Feature.EVIDENCE_EXPORT,
-    Feature.TRENDS, Feature.API_KEYS, Feature.SSO_SCIM, Feature.PROWLER,
-    Feature.AUTO_REMEDIATION, Feature.PRIORITY_SUPPORT,
-)
+_ALL = tuple(Feature)
 
 PLANS: dict[str, Plan] = {
     "free": Plan(
-        id="free", name="Free", price_usd_month=0,
-        blurb="Kick the tyres on one AWS account.",
-        max_accounts=1, max_scans_per_month=10, max_api_keys=0,
+        id="free", name="Community", price_usd_month=0, price_usd_annual=0,
+        blurb="Learning & Open Source cloud security posture check.",
+        target_audience="Learning & Open Source",
+        max_accounts=1, max_scans_per_month=10, max_api_keys=0, max_seats=2,
         frameworks=("cis_aws_v2",), features=frozenset(),
     ),
     "starter": Plan(
-        id="starter", name="Starter", price_usd_month=49,
-        blurb="For small teams securing a few accounts.",
-        max_accounts=3, max_scans_per_month=100, max_api_keys=2,
+        id="starter", name="Starter", price_usd_month=49, price_usd_annual=470,
+        blurb="For small startups securing core cloud assets.",
+        target_audience="Small startups",
+        max_accounts=3, max_scans_per_month=100, max_api_keys=3, max_seats=5,
         frameworks=("cis_aws_v2", "soc2"),
-        features=frozenset({Feature.DRIFT, Feature.API_KEYS}),
+        features=frozenset({Feature.DRIFT, Feature.API_KEYS, Feature.IAC_SCANNING}),
     ),
     "pro": Plan(
-        id="pro", name="Pro", price_usd_month=299,
-        blurb="Multi-cloud posture + compliance for growing orgs.",
-        max_accounts=15, max_scans_per_month=1000, max_api_keys=10,
+        id="pro", name="Professional", price_usd_month=299, price_usd_annual=2870,
+        blurb="Multi-cloud posture + compliance for growing SaaS teams.",
+        target_audience="Growing SaaS companies",
+        max_accounts=15, max_scans_per_month=1000, max_api_keys=10, max_seats=15,
         frameworks=("all",),
         features=frozenset({
             Feature.MULTI_CLOUD, Feature.DRIFT, Feature.INTEGRATIONS,
             Feature.EVIDENCE_EXPORT, Feature.TRENDS, Feature.API_KEYS, Feature.PROWLER,
+            Feature.IAC_SCANNING, Feature.K8S_SECURITY, Feature.AI_COPILOT,
+        }),
+    ),
+    "business": Plan(
+        id="business", name="Business", price_usd_month=999, price_usd_annual=9590,
+        blurb="Full CNAPP platform with CIEM and Attack Path Analysis.",
+        target_audience="Mid-market organizations",
+        max_accounts=50, max_scans_per_month=5000, max_api_keys=25, max_seats=50,
+        frameworks=("all",),
+        features=frozenset({
+            Feature.MULTI_CLOUD, Feature.DRIFT, Feature.INTEGRATIONS,
+            Feature.EVIDENCE_EXPORT, Feature.TRENDS, Feature.API_KEYS, Feature.PROWLER,
+            Feature.AUTO_REMEDIATION, Feature.SSO_SCIM, Feature.CIEM, Feature.ATTACK_PATH,
+            Feature.IAC_SCANNING, Feature.K8S_SECURITY, Feature.AI_COPILOT,
         }),
     ),
     "enterprise": Plan(
-        id="enterprise", name="Enterprise", price_usd_month=0,  # custom / contact sales
-        blurb="SSO, unlimited scale, and dedicated support.",
-        max_accounts=UNLIMITED, max_scans_per_month=UNLIMITED, max_api_keys=UNLIMITED,
+        id="enterprise", name="Enterprise", price_usd_month=0, price_usd_annual=0,
+        blurb="Unlimited scale, dedicated support, custom SLAs.",
+        target_audience="Large enterprises",
+        max_accounts=UNLIMITED, max_scans_per_month=UNLIMITED, max_api_keys=UNLIMITED, max_seats=UNLIMITED,
+        frameworks=("all",), features=frozenset(_ALL),
+    ),
+    "mssp": Plan(
+        id="mssp", name="MSSP Partner", price_usd_month=0, price_usd_annual=0,
+        blurb="Dedicated agency portal, white-labeling, client management.",
+        target_audience="Managed security providers",
+        max_accounts=UNLIMITED, max_scans_per_month=UNLIMITED, max_api_keys=UNLIMITED, max_seats=UNLIMITED,
         frameworks=("all",), features=frozenset(_ALL),
     ),
 }
@@ -95,12 +125,15 @@ def plan_public(plan: Plan) -> dict:
         "id": plan.id,
         "name": plan.name,
         "price_usd_month": plan.price_usd_month,
+        "price_usd_annual": plan.price_usd_annual,
         "blurb": plan.blurb,
-        "custom_pricing": plan.id == "enterprise",
+        "target_audience": plan.target_audience,
+        "custom_pricing": plan.id in ("enterprise", "mssp"),
         "limits": {
             "max_accounts": plan.max_accounts,
             "max_scans_per_month": plan.max_scans_per_month,
             "max_api_keys": plan.max_api_keys,
+            "max_seats": plan.max_seats,
             "frameworks": list(plan.frameworks),
         },
         "features": [f.value for f in _ALL if f in plan.features],

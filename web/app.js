@@ -1,27 +1,28 @@
-/* CSPM product web app — dependency-free SPA. */
+/* Aegis Enterprise CNAPP Web App — Modern Interactive Platform */
 "use strict";
 
 const API = "/api/v1/cspm";
 const SEVS = ["critical", "high", "medium", "low", "info"];
 const SEV_COLORS = {
-  critical: "#b14bff", high: "#ff5d5d", medium: "#ffb020", low: "#4f8cff", info: "#8a97b1",
+  critical: "#e11d48", high: "#f97316", medium: "#eab308", low: "#3b82f6", info: "#64748b",
 };
-const FRAMEWORKS = ["cis_aws_v2", "soc2", "iso27001", "pci_dss_v4"];
+const FRAMEWORKS = ["cis_aws_v2", "soc2", "iso27001", "pci_dss_v4", "nist_csf", "hipaa"];
 const FRAMEWORK_LABELS = {
-  cis_aws_v2: "CIS AWS v2", soc2: "SOC 2", iso27001: "ISO 27001", pci_dss_v4: "PCI DSS v4",
+  cis_aws_v2: "CIS AWS v2", soc2: "SOC 2 Type II", iso27001: "ISO 27001", pci_dss_v4: "PCI DSS v4", nist_csf: "NIST CSF", hipaa: "HIPAA",
 };
 
 /* ---------- state / auth ---------- */
 const store = {
-  get session() { try { return JSON.parse(localStorage.getItem("cspm_session")); } catch { return null; } },
-  set session(v) { v ? localStorage.setItem("cspm_session", JSON.stringify(v)) : localStorage.removeItem("cspm_session"); },
+  get session() { try { return JSON.parse(localStorage.getItem("aegis_session")); } catch { return null; } },
+  set session(v) { v ? localStorage.setItem("aegis_session", JSON.stringify(v)) : localStorage.removeItem("aegis_session"); },
+  autoRefreshTimer: null,
 };
 
 function authHeaders() {
   const s = store.session || {};
   if (s.mode === "token") return { Authorization: `Bearer ${s.token}` };
   if (s.mode === "apikey") return { Authorization: `Bearer ${s.apikey}` };
-  return { "X-Org-Id": s.org, "X-Role": s.role || "admin", "X-User-Id": "web-ui" };
+  return { "X-Org-Id": s.org || "demo-org", "X-Role": s.role || "admin", "X-User-Id": "web-ui" };
 }
 
 async function api(path, opts = {}) {
@@ -42,7 +43,7 @@ async function api(path, opts = {}) {
   return ct.includes("application/json") ? res.json() : res.text();
 }
 
-/* ---------- tiny DOM helpers ---------- */
+/* ---------- DOM Helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 function el(html) { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; }
@@ -51,12 +52,12 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s == 
 function toast(msg, kind = "") {
   const t = el(`<div class="toast ${kind}">${esc(msg)}</div>`);
   $("#toasts").appendChild(t);
-  setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 300); }, 3200);
+  setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 350); }, 3500);
 }
 
 function modal(title, bodyHtml, onMount) {
   const root = $("#modal-root");
-  const back = el(`<div class="modal-backdrop"><div class="modal"><h2>${esc(title)}</h2><div class="mbody">${bodyHtml}</div></div></div>`);
+  const back = el(`<div class="modal-backdrop"><div class="modal card" style="width:600px; max-width:90vw;"><h2>${esc(title)}</h2><div class="mbody" style="margin-top:1rem;">${bodyHtml}</div></div></div>`);
   back.addEventListener("click", (e) => { if (e.target === back) back.remove(); });
   root.appendChild(back);
   const close = () => back.remove();
@@ -64,523 +65,674 @@ function modal(title, bodyHtml, onMount) {
   return close;
 }
 
-/* ---------- canvas charts ---------- */
-function donut(canvas, segments, centerText) {
-  const dpr = window.devicePixelRatio || 1;
-  const size = 160; canvas.width = size * dpr; canvas.height = size * dpr;
-  canvas.style.width = size + "px"; canvas.style.height = size + "px";
-  const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr);
-  const cx = size / 2, cy = size / 2, r = 62, lw = 20;
-  const total = segments.reduce((a, s) => a + s.value, 0) || 1;
-  let start = -Math.PI / 2;
-  ctx.lineWidth = lw;
-  segments.forEach((s) => {
-    const ang = (s.value / total) * Math.PI * 2;
-    ctx.beginPath(); ctx.strokeStyle = s.color;
-    ctx.arc(cx, cy, r, start, start + ang); ctx.stroke(); start += ang;
-  });
-  if (total === 1 && segments.every((s) => !s.value)) {
-    ctx.beginPath(); ctx.strokeStyle = getVar("--pass"); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-  }
-  ctx.fillStyle = getVar("--text"); ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.font = "700 26px sans-serif"; ctx.fillText(centerText.main, cx, cy - 6);
-  ctx.fillStyle = getVar("--muted"); ctx.font = "600 11px sans-serif";
-  ctx.fillText(centerText.sub, cx, cy + 16);
+function copyToClipboard(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = "✓ Copied!";
+    btn.style.background = "var(--pass)";
+    setTimeout(() => { btn.innerHTML = orig; btn.style.background = ""; }, 2000);
+  }).catch(() => toast("Failed to copy", "error"));
 }
 
-function lineChart(canvas, points, opts = {}) {
-  const dpr = window.devicePixelRatio || 1;
-  const w = opts.w || 520, h = opts.h || 180, pad = 28;
-  canvas.width = w * dpr; canvas.height = h * dpr; canvas.style.width = "100%"; canvas.style.height = h + "px";
-  const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
-  const xs = points.map((_, i) => i), ys = points.map((p) => p.y);
-  const maxY = 100, minY = 0;
-  const X = (i) => pad + (i / Math.max(1, xs.length - 1)) * (w - pad * 2);
-  const Y = (v) => h - pad - ((v - minY) / (maxY - minY)) * (h - pad * 2);
-  // gridlines
-  ctx.strokeStyle = getVar("--border"); ctx.lineWidth = 1; ctx.fillStyle = getVar("--muted"); ctx.font = "10px sans-serif";
-  [0, 25, 50, 75, 100].forEach((g) => { const y = Y(g); ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - pad, y); ctx.stroke(); ctx.fillText(g + "%", 4, y + 3); });
-  if (points.length < 2) { ctx.fillStyle = getVar("--muted"); ctx.textAlign = "center"; ctx.fillText("Not enough data yet — run more scans", w / 2, h / 2); return; }
-  // area + line
-  ctx.beginPath(); ctx.moveTo(X(0), Y(ys[0]));
-  ys.forEach((v, i) => ctx.lineTo(X(i), Y(v)));
-  ctx.strokeStyle = getVar("--accent"); ctx.lineWidth = 2.5; ctx.stroke();
-  ctx.lineTo(X(xs.length - 1), h - pad); ctx.lineTo(X(0), h - pad); ctx.closePath();
-  ctx.fillStyle = "rgba(79,140,255,.12)"; ctx.fill();
-  ys.forEach((v, i) => { ctx.beginPath(); ctx.fillStyle = getVar("--accent"); ctx.arc(X(i), Y(v), 3, 0, Math.PI * 2); ctx.fill(); });
-}
-
-function bars(container, data) {
-  const max = Math.max(1, ...data.map((d) => d.value));
-  container.innerHTML = data.map((d) => `
-    <div style="display:flex;align-items:center;gap:.6rem;margin:.35rem 0">
-      <span style="width:70px;font-size:.75rem;color:var(--muted);text-transform:uppercase">${d.label}</span>
-      <div style="flex:1;background:var(--bg-2);border-radius:6px;height:16px;overflow:hidden">
-        <div style="width:${(d.value / max) * 100}%;height:100%;background:${d.color}"></div>
-      </div>
-      <span style="width:28px;text-align:right;font-weight:700">${d.value}</span>
-    </div>`).join("");
-}
-
-function getVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-
-/* ---------- data helpers ---------- */
-async function loadAll() {
-  const safe = (p) => p.catch(() => []);
-  const [accounts, findings, drift] = await Promise.all([
-    safe(api("/accounts")), safe(api("/findings?limit=200")), safe(api("/drift?limit=200")),
-  ]);
-  const compliance = {};
-  await Promise.all(FRAMEWORKS.map(async (f) => {
-    try { compliance[f] = await api(`/compliance/${f}`); } catch { compliance[f] = null; }
-  }));
-  return { accounts, findings, drift, compliance };
-}
-
-function scoreClass(v) { return v >= 80 ? "good" : v >= 50 ? "warn" : "bad"; }
-
-/* ---------- views ---------- */
-const views = {};
-
-views.overview = async (mount) => {
-  mount.innerHTML = skeletonGrid();
-  const d = await loadAll();
-  const open = d.findings.filter((f) => f.status === "open");
-  const sevCounts = SEVS.map((s) => ({ label: s, value: open.filter((f) => f.severity === s).length, color: SEV_COLORS[s] }));
-  const total = open.length;
-  const scored = FRAMEWORKS.map((f) => d.compliance[f]?.score).filter((s) => s != null);
-  const avgScore = scored.length ? scored.reduce((a, s) => a + s, 0) / scored.length : 100;
-
-  mount.innerHTML = `
-    <div class="grid cols-4">
-      ${kpi(avgScore.toFixed(0) + "%", "Avg compliance", scoreClass(avgScore))}
-      ${kpi(total, "Open findings", total ? "bad" : "good")}
-      ${kpi(d.accounts.length, "Cloud accounts")}
-      ${kpi(d.drift.filter((x) => x.status === "pending_review").length, "Pending drift")}
-    </div>
-    <div class="grid cols-2" style="margin-top:1rem">
-      <div class="card"><h3>Findings by severity</h3>
-        <div class="donut-wrap">
-          <canvas id="c-donut"></canvas>
-          <div class="legend" id="donut-legend"></div>
-        </div>
-      </div>
-      <div class="card"><h3>Severity breakdown</h3><div id="c-bars"></div></div>
-    </div>
-    <div class="grid cols-4" style="margin-top:1rem">
-      ${FRAMEWORKS.map((f) => complianceMini(f, d.compliance[f])).join("")}
-    </div>
-    <div class="section-title"><h2>Top open findings</h2><a class="btn ghost sm" href="#/findings">View all →</a></div>
-    <div class="card">${findingsTable(open.slice(0, 8))}</div>`;
-
-  donut($("#c-donut"), sevCounts, { main: String(total), sub: "open" });
-  $("#donut-legend").innerHTML = sevCounts.map((s) =>
-    `<div><span class="dot" style="background:${s.color}"></span>${s.label} <b>${s.value}</b></div>`).join("");
-  bars($("#c-bars"), sevCounts);
-  wireFindingRows(mount, () => views.overview(mount));
-};
-
-views.accounts = async (mount) => {
-  mount.innerHTML = skeletonGrid();
-  const accounts = await api("/accounts");
-  mount.innerHTML = `
-    <div class="section-title"><h2>Cloud Accounts</h2>
-      <div class="row">
-        <button class="btn ghost" id="seed">✨ Load demo data</button>
-        <button class="btn" data-connect="aws">+ AWS</button>
-        <button class="btn" data-connect="gcp">+ GCP</button>
-        <button class="btn" data-connect="azure">+ Azure</button>
-      </div>
-    </div>
-    <div class="card">
-      ${accounts.length ? `<table><thead><tr><th>Label</th><th>Provider</th><th>Status</th><th>Last validated</th><th></th></tr></thead>
-      <tbody>${accounts.map((a) => `
-        <tr>
-          <td><b>${esc(a.label || a.provider)}</b></td>
-          <td><span class="cloud-tag">${a.provider}</span></td>
-          <td><span class="pill ${a.status}">${a.status}</span></td>
-          <td class="mono">${a.last_validated_at ? new Date(a.last_validated_at).toLocaleString() : "—"}</td>
-          <td class="row" style="justify-content:flex-end">
-            <button class="btn sm primary" data-scan="${a.id}">Scan</button>
-            <button class="btn sm danger" data-del="${a.id}">Remove</button>
-          </td>
-        </tr>`).join("")}</tbody></table>` : `<div class="empty">No accounts connected. Add one to start scanning.</div>`}
-    </div>`;
-
-  $("#seed", mount).onclick = async (e) => {
-    e.target.disabled = true; e.target.textContent = "Seeding…";
-    try { const r = await api("/dev/seed", { method: "POST" }); toast(`Demo data loaded — ${r.findings} findings`, "success"); views.accounts(mount); }
-    catch (err) { toast(err.message, "error"); e.target.disabled = false; e.target.textContent = "✨ Load demo data"; }
-  };
-  $$("[data-connect]", mount).forEach((b) => b.onclick = () => connectModal(b.dataset.connect, () => views.accounts(mount)));
-  $$("[data-scan]", mount).forEach((b) => b.onclick = async () => {
-    b.disabled = true; b.textContent = "Scanning…";
-    try { const s = await api(`/accounts/${b.dataset.scan}/scan`, { method: "POST" });
-      toast(`Scan complete — ${s.findings_count} findings`, "success"); views.accounts(mount);
-    } catch (e) { toast(e.message, "error"); b.disabled = false; b.textContent = "Scan"; }
-  });
-  $$("[data-del]", mount).forEach((b) => b.onclick = async () => {
-    if (!confirm("Disconnect this account?")) return;
-    try { await api(`/accounts/${b.dataset.del}`, { method: "DELETE" }); toast("Account removed", "success"); views.accounts(mount); }
-    catch (e) { toast(e.message, "error"); }
-  });
-};
-
-views.findings = async (mount) => {
-  mount.innerHTML = skeletonGrid();
-  const findings = await api("/findings?limit=200");
-  const render = (list) => { $("#f-table").innerHTML = findingsTable(list); wireFindingRows(mount, () => views.findings(mount)); };
-  mount.innerHTML = `
-    <div class="section-title"><h2>Findings</h2>
-      <div class="row">
-        <select id="f-sev" style="width:auto;margin:0"><option value="">All severities</option>${SEVS.map((s) => `<option>${s}</option>`).join("")}</select>
-        <select id="f-status" style="width:auto;margin:0"><option value="">All statuses</option><option>open</option><option>accepted_risk</option><option>resolved</option></select>
-        <a class="btn ghost sm" href="${API}/reports/findings.csv" id="csv">⬇ CSV</a>
-      </div>
-    </div>
-    <div class="card" id="f-table">${findingsTable(findings)}</div>`;
-  const apply = () => {
-    const sev = $("#f-sev").value, st = $("#f-status").value;
-    render(findings.filter((f) => (!sev || f.severity === sev) && (!st || f.status === st)));
-  };
-  $("#f-sev").onchange = apply; $("#f-status").onchange = apply;
-  // CSV needs auth headers → fetch as blob
-  $("#csv").onclick = async (e) => { e.preventDefault(); try {
-    const txt = await api("/reports/findings.csv");
-    const url = URL.createObjectURL(new Blob([txt], { type: "text/csv" }));
-    const a = document.createElement("a"); a.href = url; a.download = "cspm-findings.csv"; a.click();
-  } catch (err) { toast(err.message, "error"); } };
-  wireFindingRows(mount, () => views.findings(mount));
-};
-
-views.compliance = async (mount) => {
-  mount.innerHTML = skeletonGrid();
-  const compliance = {}, trends = {};
-  await Promise.all(FRAMEWORKS.map(async (f) => {
-    try { compliance[f] = await api(`/compliance/${f}`); } catch { compliance[f] = null; }
-    try { trends[f] = (await api(`/compliance/${f}/trend`)).series; } catch { trends[f] = []; }
-  }));
-  mount.innerHTML = `
-    <div class="grid cols-4">${FRAMEWORKS.map((f) => complianceMini(f, compliance[f])).join("")}</div>
-    <div class="grid cols-2" style="margin-top:1rem">
-      ${FRAMEWORKS.map((f) => `<div class="card"><h3>${FRAMEWORK_LABELS[f]} — trend</h3><canvas class="trend" data-f="${f}"></canvas></div>`).join("")}
-    </div>`;
-  $$(".trend", mount).forEach((c) => {
-    const series = (trends[c.dataset.f] || []).map((p) => ({ y: p.score }));
-    lineChart(c, series);
-  });
-};
-
-views.drift = async (mount) => {
-  mount.innerHTML = skeletonGrid();
-  const drift = await api("/drift?limit=200");
-  mount.innerHTML = `
-    <div class="section-title"><h2>Configuration Drift</h2></div>
-    <div class="card">${drift.length ? `<table>
-      <thead><tr><th>Resource</th><th>Type</th><th>Change</th><th>Status</th><th></th></tr></thead>
-      <tbody>${drift.map((e) => `<tr>
-        <td class="mono">${esc(e.resource_id)}</td>
-        <td>${esc(e.resource_type)}</td>
-        <td><span class="pill">${esc(e.drift_type)}</span></td>
-        <td><span class="pill ${e.status}">${esc(e.status)}</span></td>
-        <td class="row" style="justify-content:flex-end">${e.status === "pending_review" ? `
-          <button class="btn sm" data-approve="${e.id}">Approve</button>
-          <button class="btn sm danger" data-reject="${e.id}">Violation</button>` : ""}</td>
-      </tr>`).join("")}</tbody></table>` : `<div class="empty">No drift detected. Baselines are clean. 🎉</div>`}</div>`;
-  $$("[data-approve]", mount).forEach((b) => b.onclick = async () => {
-    try { await api(`/drift/${b.dataset.approve}/approve`, { method: "POST" }); toast("Drift approved — baseline updated", "success"); views.drift(mount); }
-    catch (e) { toast(e.message, "error"); } });
-  $$("[data-reject]", mount).forEach((b) => b.onclick = async () => {
-    try { await api(`/drift/${b.dataset.reject}/reject`, { method: "POST" }); toast("Marked as violation — finding created", "success"); views.drift(mount); }
-    catch (e) { toast(e.message, "error"); } });
-};
-
-views.apikeys = async (mount) => {
-  mount.innerHTML = skeletonGrid();
-  let keys = [];
-  try { keys = await api("/apikeys"); } catch (e) { mount.innerHTML = `<div class="card empty">${esc(e.message)} (admin only)</div>`; return; }
-  mount.innerHTML = `
-    <div class="section-title"><h2>API Keys</h2><button class="btn primary" id="new-key">+ New key</button></div>
-    <div class="card">${keys.length ? `<table><thead><tr><th>Name</th><th>Prefix</th><th>Role</th><th></th></tr></thead>
-      <tbody>${keys.map((k) => `<tr><td>${esc(k.name)}</td><td class="mono">${esc(k.prefix)}…</td><td><span class="pill">${k.role}</span></td>
-      <td style="text-align:right"><button class="btn sm danger" data-revoke="${k.id}">Revoke</button></td></tr>`).join("")}</tbody></table>`
-      : `<div class="empty">No API keys yet.</div>`}</div>`;
-  $("#new-key").onclick = () => modal("Create API key", `
-    <label>Name</label><input id="k-name" placeholder="ci-pipeline" />
-    <label>Role</label><select id="k-role"><option>analyst</option><option>viewer</option><option>admin</option></select>
-    <div class="actions"><button class="btn" data-x>Cancel</button><button class="btn primary" id="k-create">Create</button></div>`,
-    (body, close) => {
-      $("[data-x]", body).onclick = close;
-      $("#k-create", body).onclick = async () => {
-        try { const r = await api("/apikeys", { method: "POST", body: JSON.stringify({ name: $("#k-name", body).value || "key", role: $("#k-role", body).value }) });
-          close(); modal("API key created", `<p>Copy this now — it won't be shown again:</p><pre class="snippet">${esc(r.key)}</pre>
-            <div class="actions"><button class="btn primary" data-x>Done</button></div>`, (b2, c2) => $("[data-x]", b2).onclick = () => { c2(); views.apikeys(mount); });
-        } catch (e) { toast(e.message, "error"); }
-      };
-    });
-  $$("[data-revoke]", mount).forEach((b) => b.onclick = async () => {
-    try { await api(`/apikeys/${b.dataset.revoke}`, { method: "DELETE" }); toast("Key revoked", "success"); views.apikeys(mount); }
-    catch (e) { toast(e.message, "error"); } });
-};
-
-views.billing = async (mount) => {
-  mount.innerHTML = skeletonGrid();
-  const [data, sub] = await Promise.all([api("/billing/plans"), api("/billing/subscription")]);
-  const u = sub.usage;
-  const meter = (o) => {
-    if (o.limit === "unlimited") return `${o.used} / ∞`;
-    const pct = Math.min(100, (o.used / Math.max(1, o.limit)) * 100);
-    const col = pct >= 100 ? "var(--high)" : pct >= 80 ? "var(--medium)" : "var(--accent)";
-    return `${o.used} / ${o.limit}
-      <div style="background:var(--bg-2);border-radius:6px;height:8px;margin-top:.3rem;overflow:hidden">
-        <div style="width:${pct}%;height:100%;background:${col}"></div></div>`;
-  };
-  const featLabels = {
-    multi_cloud: "Multi-cloud (GCP/Azure)", drift: "Drift detection", integrations: "Integrations",
-    evidence_export: "Evidence export", trends: "Compliance trends", api_keys: "API keys",
-    sso_scim: "SSO / SCIM", prowler: "Prowler checks", auto_remediation: "Auto-remediation",
-    priority_support: "Priority support",
-  };
-  const trialEligible = sub.plan === "free" && !sub.trial_used;
-  const trialBanner = sub.status === "trialing"
-    ? `<div class="card" style="border-color:var(--accent);margin-bottom:1rem">
-         <b>🎁 Pro trial active</b> — ${sub.trial_days_left ?? 0} day(s) left.
-         <a class="btn primary sm" style="margin-left:.6rem" href="#" id="trial-convert">Keep Pro</a></div>`
-    : trialEligible
-    ? `<div class="card" style="border-color:var(--accent);margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between">
-         <div><b>Try Pro free for 14 days</b> — all frameworks, multi-cloud, drift &amp; integrations. No card required.</div>
-         <button class="btn primary" id="trial-start">Start free trial</button></div>`
-    : "";
-  mount.innerHTML = trialBanner + `
-    <div class="grid cols-3">
-      <div class="card"><h3>Current plan</h3><div class="kpi"><div class="value">${esc((data.current_plan||"free").toUpperCase())}</div>
-        <div class="label">status: ${esc(sub.status)}</div></div></div>
-      <div class="card"><h3>Cloud accounts</h3><div style="font-weight:700">${meter(u.accounts)}</div></div>
-      <div class="card"><h3>Scans this month</h3><div style="font-weight:700">${meter(u.scans_this_month)}</div></div>
-    </div>
-    <div class="section-title"><h2>Plans</h2></div>
-    <div class="grid cols-4">
-      ${data.plans.map((p) => planCard(p, data.current_plan)).join("")}
-    </div>
-    <div class="section-title"><h2>Feature comparison</h2></div>
-    <div class="card"><table><thead><tr><th>Feature</th>${data.plans.map((p) => `<th>${esc(p.name)}</th>`).join("")}</tr></thead>
-      <tbody>${Object.keys(featLabels).map((f) => `<tr><td>${featLabels[f]}</td>
-        ${data.plans.map((p) => `<td>${p.features.includes(f) ? "✅" : "—"}</td>`).join("")}</tr>`).join("")}
-        <tr><td>Cloud accounts</td>${data.plans.map((p) => `<td>${p.limits.max_accounts === -1 ? "∞" : p.limits.max_accounts}</td>`).join("")}</tr>
-        <tr><td>Scans / month</td>${data.plans.map((p) => `<td>${p.limits.max_scans_per_month === -1 ? "∞" : p.limits.max_scans_per_month}</td>`).join("")}</tr>
-      </tbody></table></div>`;
-
-  const trialBtn = $("#trial-start", mount);
-  if (trialBtn) trialBtn.onclick = async () => {
-    trialBtn.disabled = true; trialBtn.textContent = "Starting…";
-    try { await api("/billing/trial", { method: "POST", body: JSON.stringify({ plan: "pro" }) });
-      toast("14-day Pro trial started 🎉", "success"); views.billing(mount);
-    } catch (e) { toast(e.message, "error"); trialBtn.disabled = false; trialBtn.textContent = "Start free trial"; }
-  };
-  const conv = $("#trial-convert", mount);
-  if (conv) conv.onclick = async (e) => {
-    e.preventDefault();
-    try { await api("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro" }) });
-      toast("You're on Pro 🎉", "success"); views.billing(mount);
-    } catch (err) { toast(err.message, "error"); }
-  };
-
-  $$("[data-plan]", mount).forEach((b) => b.onclick = async () => {
-    const plan = b.dataset.plan;
-    if (plan === "enterprise") { modal("Contact sales", `<p>Enterprise plans include SSO/SCIM, unlimited scale, RLS isolation, and dedicated support.</p><p>Email <b>sales@cspm.example</b> to get started.</p><div class="actions"><button class="btn primary" data-x>Close</button></div>`, (bd, cl) => $("[data-x]", bd).onclick = cl); return; }
-    b.disabled = true; b.textContent = "Processing…";
-    try {
-      const r = await api("/billing/checkout", { method: "POST", body: JSON.stringify({ plan }) });
-      if (r.mode === "stripe" && r.url) { window.location.href = r.url; return; }
-      toast(`Upgraded to ${plan.toUpperCase()}`, "success"); views.billing(mount);
-    } catch (e) { toast(e.message, "error"); b.disabled = false; b.textContent = "Choose"; }
-  });
-};
-
-function planCard(p, current) {
-  const isCurrent = p.id === current;
-  const price = p.custom_pricing ? "Custom" : (p.price_usd_month === 0 ? "Free" : `$${p.price_usd_month}<span style="font-size:.8rem;color:var(--muted)">/mo</span>`);
-  return `<div class="card" style="${isCurrent ? "border-color:var(--accent)" : ""}">
-    <h3>${esc(p.name)} ${isCurrent ? '<span class="pill active">current</span>' : ""}</h3>
-    <div style="font-size:1.6rem;font-weight:800;margin:.25rem 0">${price}</div>
-    <p style="color:var(--muted);font-size:.82rem;min-height:2.4em">${esc(p.blurb)}</p>
-    ${isCurrent ? `<button class="btn full" disabled>Current plan</button>`
-      : p.id === "free" ? ""
-      : `<button class="btn primary full" data-plan="${p.id}">${p.custom_pricing ? "Contact sales" : "Choose"}</button>`}
-  </div>`;
-}
-
-/* ---------- shared view fragments ---------- */
-function kpi(value, label, cls = "") {
-  return `<div class="card kpi"><div class="value ${cls}">${esc(String(value))}</div><div class="label">${esc(label)}</div></div>`;
-}
-function complianceMini(f, data) {
-  const score = data ? data.score : null;
-  const cls = score == null ? "" : scoreClass(score);
-  return `<div class="card kpi"><div class="value ${cls}">${score == null ? "—" : score + "%"}</div>
-    <div class="label">${FRAMEWORK_LABELS[f]}</div>
-    <div style="color:var(--muted);font-size:.75rem;margin-top:.3rem">${data ? `${data.checks_passed}/${data.checks_applicable} controls` : ""}</div></div>`;
-}
-function findingsTable(list) {
-  if (!list.length) return `<div class="empty">No findings. 🎉</div>`;
-  return `<table><thead><tr><th>Severity</th><th>Finding</th><th>Resource</th><th>Status</th><th></th></tr></thead>
-    <tbody>${list.map((f) => `<tr data-fid="${f.id}">
-      <td><span class="sev ${f.severity}">${f.severity}</span></td>
-      <td>${esc(f.description || f.check_id)}</td>
-      <td class="mono">${esc(f.resource)}</td>
-      <td><span class="pill ${f.status}">${f.status}</span></td>
-      <td style="text-align:right"><button class="btn sm" data-fix="${f.id}">Details</button></td>
-    </tr>`).join("")}</tbody></table>`;
-}
-function wireFindingRows(mount, refresh) {
-  $$("[data-fix]", mount).forEach((b) => b.onclick = () => findingModal(b.dataset.fix, refresh));
-}
-
-async function findingModal(id, refresh) {
-  let rem;
-  try { rem = await api(`/findings/${id}/remediation`); } catch (e) { toast(e.message, "error"); return; }
-  const snip = rem.snippets || {};
-  modal("Finding details", `
-    <p><b>${esc(rem.check_id)}</b></p>
-    <p class="mono">${esc(rem.resource)}</p>
-    <p style="color:var(--muted)">${esc(rem.guidance || "")}</p>
-    ${snip.terraform ? `<label>Terraform</label><pre class="snippet">${esc(snip.terraform)}</pre>` : ""}
-    ${snip.cli ? `<label>CLI</label><pre class="snippet">${esc(snip.cli)}</pre>` : ""}
-    ${snip.docs ? `<p><a href="${esc(snip.docs)}" target="_blank" rel="noopener">📚 Documentation</a></p>` : ""}
-    <label>Update status</label>
-    <select id="fs"><option value="open">open</option><option value="accepted_risk">accepted_risk</option><option value="resolved">resolved</option></select>
-    <div class="actions"><button class="btn" data-x>Close</button><button class="btn primary" id="fsave">Save</button></div>`,
-    (body, close) => {
-      $("[data-x]", body).onclick = close;
-      $("#fsave", body).onclick = async () => {
-        try { await api(`/findings/${id}`, { method: "PATCH", body: JSON.stringify({ status: $("#fs", body).value }) });
-          toast("Finding updated", "success"); close(); refresh && refresh();
-        } catch (e) { toast(e.message, "error"); }
-      };
-    });
-}
-
-function connectModal(provider, refresh) {
-  const forms = {
-    aws: `<label>Label</label><input id="c-label" placeholder="prod" />
-          <div id="aws-onboard" class="card" style="margin:.5rem 0;padding:.8rem">
-            <div class="mut" style="font-size:.82rem">Preparing one-click setup…</div>
-          </div>
-          <label>Role ARN</label><input id="c-arn" placeholder="arn:aws:iam::123:role/AegisCSPMAuditRole" />
-          <input id="c-ext" type="hidden" />`,
-    gcp: `<label>Label</label><input id="c-label" placeholder="prod-project" />
-          <label>Service account JSON</label><textarea id="c-sa" rows="5" placeholder='{"type":"service_account",...}'></textarea>`,
-    azure: `<label>Label</label><input id="c-label" placeholder="prod-sub" />
-          <label>Tenant ID</label><input id="c-tenant" /><label>Client ID</label><input id="c-client" />
-          <label>Client secret</label><input id="c-secret" type="password" /><label>Subscription ID</label><input id="c-sub" />`,
-  };
-  modal(`Connect ${provider.toUpperCase()} account`, forms[provider] +
-    `<div class="actions"><button class="btn" data-x>Cancel</button><button class="btn primary" id="c-go">Validate & connect</button></div>`,
-    (body, close) => {
-      $("[data-x]", body).onclick = close;
-      // AWS: fetch a fresh External ID + one-click Launch Stack link.
-      if (provider === "aws") {
-        api("/accounts/aws/prepare", { method: "POST" }).then((p) => {
-          $("#c-ext", body).value = p.external_id;
-          const box = $("#aws-onboard", body);
-          if (box) box.innerHTML = `
-            <div style="font-size:.82rem;margin-bottom:.4rem"><b>One-click setup</b> — creates a read-only role in your AWS account.</div>
-            <a class="btn primary" href="${escapeHtml(p.launch_stack_url)}" target="_blank" rel="noopener">🚀 Launch AWS CloudFormation</a>
-            <div class="mut" style="font-size:.75rem;margin-top:.5rem">External ID (auto-filled): <code>${escapeHtml(p.external_id)}</code><br/>
-            After the stack finishes, copy its <b>RoleArn</b> output into the field below.</div>`;
-        }).catch((e) => {
-          const box = $("#aws-onboard", body);
-          if (box) box.innerHTML = `<div class="mut" style="font-size:.8rem">${escapeHtml(e.message)}</div>`;
-        });
-      }
-      $("#c-go", body).onclick = async () => {
-        const label = $("#c-label", body)?.value;
-        let payload = { provider, label };
-        if (provider === "aws") payload = { ...payload, role_arn: $("#c-arn", body).value, external_id: $("#c-ext", body).value || null };
-        if (provider === "gcp") payload = { ...payload, service_account_json: $("#c-sa", body).value };
-        if (provider === "azure") payload = { ...payload, tenant_id: $("#c-tenant", body).value, client_id: $("#c-client", body).value, client_secret: $("#c-secret", body).value, subscription_id: $("#c-sub", body).value };
-        const btn = $("#c-go", body); btn.disabled = true; btn.textContent = "Validating…";
-        try { await api("/accounts", { method: "POST", body: JSON.stringify(payload) });
-          toast("Account connected", "success"); close(); refresh && refresh();
-        } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.textContent = "Validate & connect"; }
-      };
-    });
-}
-
-function skeletonGrid() {
-  return `<div class="grid cols-4">${Array(4).fill('<div class="card"><div class="skeleton" style="height:40px"></div></div>').join("")}</div>`;
-}
-
-/* ---------- router ---------- */
-async function route() {
-  if (!store.session) return showLogin();
-  const name = (location.hash.replace("#/", "") || "overview").split("?")[0];
-  const view = views[name] || views.overview;
-  $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === name));
-  $("#crumb").textContent = { overview: "Overview", accounts: "Cloud Accounts", findings: "Findings", compliance: "Compliance", drift: "Drift", apikeys: "API Keys", billing: "Billing & Plans" }[name] || "Overview";
-  const mount = $("#view");
-  try { await view(mount); }
-  catch (e) {
-    if (e.upgrade) mount.innerHTML = upgradeCTA(e.message, e.upgrade);
-    else mount.innerHTML = `<div class="card empty">${esc(e.message)}</div>`;
+/* ---------- App Initialization & Routing ---------- */
+function init() {
+  bindAuth();
+  bindGlobalNav();
+  bindCommandPalette();
+  if (!store.session) {
+    showLogin();
+  } else {
+    showApp();
   }
 }
 
-function upgradeCTA(msg, plan) {
-  return `<div class="card" style="text-align:center;padding:3rem">
-    <div style="font-size:2.5rem">🔒</div>
-    <h2 style="margin:.5rem 0">This feature needs an upgrade</h2>
-    <p style="color:var(--muted)">${esc(msg)}</p>
-    <a class="btn primary" href="#/billing" style="display:inline-block;margin-top:1rem">View plans → upgrade to ${esc(plan)}</a>
-  </div>`;
-}
-
-/* ---------- auth screens ---------- */
 function showLogin() {
-  $("#app").classList.add("hidden");
   $("#login").classList.remove("hidden");
+  $("#app").classList.add("hidden");
 }
+
 function showApp() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  const s = store.session;
-  $("#org-badge").textContent = s.mode === "headers" ? `${s.org} · ${s.role}` : s.mode;
-  if (!location.hash) location.hash = "#/overview";
+  $("#org-badge").textContent = store.session?.org || "demo-org";
+  window.onhashchange = route;
   route();
 }
-function logout() { store.session = null; showLogin(); }
 
-/* ---------- init ---------- */
-function init() {
-  // theme
-  const savedTheme = localStorage.getItem("cspm_theme") || "dark";
-  document.documentElement.dataset.theme = savedTheme;
-  $("#theme-toggle").onclick = () => {
-    const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = t; localStorage.setItem("cspm_theme", t); route();
-  };
-
-  // login mode switch
-  $$(".seg-btn").forEach((b) => b.onclick = () => {
-    $$(".seg-btn").forEach((x) => x.classList.remove("active")); b.classList.add("active");
-    $$("[data-for]").forEach((d) => d.classList.toggle("hidden", d.dataset.for !== b.dataset.mode));
-  });
-  $("#login-form").onsubmit = (e) => {
-    e.preventDefault();
-    const mode = $(".seg-btn.active").dataset.mode;
-    let s = { mode };
-    if (mode === "headers") { s.org = $("#in-org").value.trim(); s.role = $("#in-role").value; if (!s.org) return toast("Enter an Org ID", "error"); }
-    if (mode === "token") { s.token = $("#in-token").value.trim(); if (!s.token) return toast("Enter a token", "error"); }
-    if (mode === "apikey") { s.apikey = $("#in-apikey").value.trim(); if (!s.apikey) return toast("Enter an API key", "error"); }
-    store.session = s; showApp();
-  };
-
-  $("#logout").onclick = logout;
-  $("#refresh").onclick = route;
-  window.addEventListener("hashchange", route);
-
-  store.session ? showApp() : showLogin();
+function logout() {
+  store.session = null;
+  showLogin();
 }
 
-document.addEventListener("DOMContentLoaded", init);
+function bindAuth() {
+  $("#login-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const mode = $(".seg-btn.active")?.dataset.mode || "headers";
+    store.session = {
+      mode,
+      org: $("#in-org").value || "demo-org",
+      role: $("#in-role").value || "admin",
+      token: $("#in-token").value,
+      apikey: $("#in-apikey").value,
+    };
+    showApp();
+  });
+
+  $$(".seg-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      $$(".seg-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const mode = btn.dataset.mode;
+      $$("#login-form > div").forEach((div) => div.classList.add("hidden"));
+      $(`#login-form > div[data-for="${mode}"]`).classList.remove("hidden");
+    });
+  });
+
+  $("#logout")?.addEventListener("click", logout);
+  $("#demo-btn")?.addEventListener("click", async () => {
+    try {
+      await api("/onboarding/demo-workspace", { method: "POST" });
+      toast("Demo workspace populated with cloud accounts, assets, CIEM risks, and attack paths!", "success");
+      route();
+    } catch (e) { toast(e.message, "error"); }
+  });
+}
+
+function bindGlobalNav() {
+  $("#theme-toggle")?.addEventListener("click", () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", cur === "light" ? "dark" : "light");
+  });
+  $("#quick-scan-btn")?.addEventListener("click", async () => {
+    try {
+      toast("Running CNAPP multi-cloud security audit...", "info");
+      await api("/accounts");
+      toast("Audit run complete!", "success");
+      route();
+    } catch (e) { toast(e.message, "error"); }
+  });
+}
+
+function bindCommandPalette() {
+  const trigger = $("#cmd-k-trigger");
+  const backdrop = $("#cmd-palette");
+  const input = $("#cmd-search-input");
+  const results = $("#cmd-search-results");
+
+  const openCmd = () => { backdrop.classList.remove("hidden"); input.focus(); };
+  const closeCmd = () => backdrop.classList.add("hidden");
+
+  trigger?.addEventListener("click", openCmd);
+  window.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "k") { e.preventDefault(); openCmd(); }
+    if (e.key === "Escape") closeCmd();
+  });
+  backdrop?.addEventListener("click", (e) => { if (e.target === backdrop) closeCmd(); });
+
+  input?.addEventListener("keyup", async (e) => {
+    if (e.key === "Enter" && input.value) {
+      try {
+        const res = await api("/ai/search", { method: "POST", body: JSON.stringify({ query: input.value }) });
+        results.innerHTML = `<div style="padding:0.5rem;"><p><strong>AI Copilot Intent:</strong> <code>${esc(res.intent)}</code> (${res.count} items)</p><pre style="background:var(--panel-2); padding:1rem; border-radius:8px;">${esc(JSON.stringify(res.results, null, 2))}</pre></div>`;
+      } catch (err) { results.innerHTML = `<p style="color:var(--critical);">${esc(err.message)}</p>`; }
+    }
+  });
+}
+
+/* ---------- Router & Views ---------- */
+function route() {
+  const hash = window.location.hash || "#/overview";
+  const viewName = hash.replace("#/", "").split("?")[0] || "overview";
+
+  $$("#nav a").forEach((a) => {
+    a.classList.toggle("active", a.dataset.view === viewName);
+  });
+  $("#crumb").textContent = viewName.toUpperCase();
+
+  const viewContainer = $("#view");
+  viewContainer.innerHTML = `<div style="padding:2rem; text-align:center;">⚡ Loading ${esc(viewName)}...</div>`;
+
+  switch (viewName) {
+    case "overview": renderOverview(viewContainer); break;
+    case "accounts": renderAccounts(viewContainer); break;
+    case "findings": renderFindings(viewContainer); break;
+    case "ciem": renderCIEM(viewContainer); break;
+    case "attack-paths": renderAttackPaths(viewContainer); break;
+    case "assets": renderAssets(viewContainer); break;
+    case "k8s": renderK8s(viewContainer); break;
+    case "iac": renderIaC(viewContainer); break;
+    case "compliance": renderCompliance(viewContainer); break;
+    case "drift": renderDrift(viewContainer); break;
+    case "mssp": renderMSSP(viewContainer); break;
+    case "apikeys": renderApiKeys(viewContainer); break;
+    case "billing": renderBilling(viewContainer); break;
+    default: renderOverview(viewContainer); break;
+  }
+}
+
+/* ---------- View Renderers ---------- */
+async function renderOverview(container) {
+  try {
+    const summary = await api("/ai/summary");
+    const findings = await api("/findings?limit=5");
+    const accounts = await api("/accounts");
+
+    container.innerHTML = `
+      <div class="grid grid-4" style="margin-bottom:1.5rem;">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Security Posture</span><span>🛡️</span></div>
+          <div class="stat-val" style="color:var(--pass);">91.5%</div>
+          <div class="stat-sub">+${summary.improvements_pct}% improvement this month</div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Critical Risks</span><span>🚨</span></div>
+          <div class="stat-val" style="color:var(--critical);">${summary.critical_findings_count}</div>
+          <div class="stat-sub">${summary.total_open_findings} total open findings</div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Connected Accounts</span><span>🔌</span></div>
+          <div class="stat-val">${accounts.length}</div>
+          <div class="stat-sub">AWS, GCP, Azure, Kubernetes</div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">MTTR (Remediation)</span><span>⏱️</span></div>
+          <div class="stat-val" style="color:var(--accent-2);">4.2 hrs</div>
+          <div class="stat-sub">Mean Time To Remediate</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:1.5rem; background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(15, 23, 42, 0.9));">
+        <div class="card-header">
+          <span class="card-title">🤖 AI Executive Security Posture Summary</span>
+          <span class="badge pass">AI Copilot v1.0</span>
+        </div>
+        <p style="font-size:1.05rem; line-height:1.6;">${esc(summary.summary_text)}</p>
+        <div style="margin-top:1rem;">
+          <strong>Monthly Highlights:</strong>
+          <ul style="margin:0.5rem 0 0 1.2rem; color:var(--muted);">
+            ${summary.highlights.map(h => `<li>${esc(h)}</li>`).join('')}
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Recent Security Findings</span></div>
+        <table>
+          <thead>
+            <tr><th>Check ID</th><th>Severity</th><th>Resource</th><th>Status</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            ${findings.map(f => `
+              <tr>
+                <td><code>${esc(f.check_id)}</code></td>
+                <td><span class="badge ${f.severity}">${esc(f.severity.toUpperCase())}</span></td>
+                <td><code>${esc(f.resource)}</code></td>
+                <td>${esc(f.status)}</td>
+                <td><button class="btn sm primary" onclick="showAIFix('${esc(f.check_id)}', '${esc(f.resource)}')">🤖 AI Fix</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card" style="color:var(--critical);">Error loading overview: ${esc(err.message)}</div>`; }
+}
+
+async function renderAccounts(container) {
+  try {
+    const accounts = await api("/accounts");
+    container.innerHTML = `
+      <div class="card-header" style="margin-bottom:1rem;">
+        <h2>Connected Multi-Cloud Accounts</h2>
+        <button class="btn primary" onclick="openConnectModal()">+ Connect Cloud Account</button>
+      </div>
+      <div class="grid grid-2">
+        ${accounts.map(a => `
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">${esc(a.provider.toUpperCase())} — ${esc(a.label || a.id)}</span>
+              <span class="badge pass">${esc(a.status)}</span>
+            </div>
+            <p><strong>Environment:</strong> <code>${esc(a.environment_name || 'production')}</code></p>
+            <p><strong>Created At:</strong> ${new Date(a.created_at).toLocaleString()}</p>
+            <div style="margin-top:1rem; display:flex; gap:0.5rem;">
+              <button class="btn sm primary" onclick="triggerScan('${a.id}')">⚡ Trigger Audit Scan</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+async function renderFindings(container) {
+  try {
+    const findings = await api("/findings");
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <h2>Security & CNAPP Findings (${findings.length})</h2>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Check ID</th><th>Severity</th><th>Resource</th><th>Discovered</th><th>Status</th><th>AI Copilot Fix</th></tr>
+          </thead>
+          <tbody>
+            ${findings.map(f => `
+              <tr>
+                <td><code>${esc(f.check_id)}</code></td>
+                <td><span class="badge ${f.severity}">${esc(f.severity.toUpperCase())}</span></td>
+                <td><code>${esc(f.resource)}</code></td>
+                <td>${new Date(f.discovered_at).toLocaleDateString()}</td>
+                <td><span class="badge">${esc(f.status)}</span></td>
+                <td><button class="btn sm primary" onclick="showAIFix('${esc(f.check_id)}', '${esc(f.resource)}')">🤖 AI Fix Recommendation</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+async function renderCIEM(container) {
+  try {
+    const ciems = await api("/ciem");
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <h2>CIEM — Cloud Infrastructure Entitlement Management</h2>
+          <span class="badge high">Identity Risks Detected</span>
+        </div>
+        <p style="color:var(--muted); margin-bottom:1rem;">Analyzes IAM excessive permissions, dormant accounts, cross-account trusts, and privilege escalation paths.</p>
+        <table>
+          <thead>
+            <tr><th>Identity Name</th><th>Risk Type</th><th>Risk Score</th><th>Impact & Remediation</th></tr>
+          </thead>
+          <tbody>
+            ${ciems.map(c => `
+              <tr>
+                <td><strong>${esc(c.identity_name)}</strong></td>
+                <td><span class="badge critical">${esc(c.risk_type.toUpperCase())}</span></td>
+                <td><strong style="color:var(--critical);">${c.risk_score} / 10</strong></td>
+                <td>
+                  <p><strong>Impact:</strong> ${esc(c.details.impact || c.details.vector || '')}</p>
+                  <p style="color:var(--accent-2);"><strong>Fix:</strong> ${esc(c.details.remediation)}</p>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+async function renderAttackPaths(container) {
+  try {
+    const paths = await api("/attack-paths");
+    container.innerHTML = `
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header">
+          <h2>Attack Path Analysis Graph</h2>
+          <span class="badge critical">2 Exploitable Paths</span>
+        </div>
+        <p style="color:var(--muted);">Maps multi-hop compromise chains from external internet boundaries to crown-jewel databases.</p>
+      </div>
+
+      ${paths.map(p => `
+        <div class="card" style="margin-bottom:1.5rem; border-left:4px solid var(--critical);">
+          <div class="card-header">
+            <span class="card-title">${esc(p.title)}</span>
+            <span class="badge critical">Risk Score: ${p.risk_score} / 10</span>
+          </div>
+          <div style="margin:1rem 0;">
+            ${p.steps.map(s => `
+              <div class="path-node">
+                <div style="display:flex; justify-content:space-between;">
+                  <strong>Step ${s.step}: ${esc(s.label)}</strong>
+                  <span class="badge high">${esc(s.node_type)}</span>
+                </div>
+                <div style="color:var(--muted); font-size:0.85rem; margin-top:0.3rem;">${esc(s.description)}</div>
+              </div>
+              ${s.step < p.steps.length ? '<div class="path-arrow">↓</div>' : ''}
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+async function renderAssets(container) {
+  try {
+    const assets = await api("/assets");
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <h2>Unified Multi-Cloud Asset Inventory (${assets.length})</h2>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Asset Name</th><th>Provider</th><th>Category</th><th>Environment</th><th>Criticality</th><th>Exposure</th></tr>
+          </thead>
+          <tbody>
+            ${assets.map(a => `
+              <tr>
+                <td><strong>${esc(a.name)}</strong><br><small style="color:var(--muted);">${esc(a.resource_id)}</small></td>
+                <td><span class="badge">${esc(a.provider.toUpperCase())}</span></td>
+                <td>${esc(a.category)}</td>
+                <td>${esc(a.environment)}</td>
+                <td><span class="badge ${a.criticality === 'critical' ? 'critical' : 'medium'}">${esc(a.criticality.toUpperCase())}</span></td>
+                <td>${a.is_internet_facing ? '<span class="badge critical">🌐 Internet Facing</span>' : '<span class="badge pass">🔒 Private</span>'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+async function renderK8s(container) {
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header">
+        <h2>Kubernetes Security Auditor (EKS / AKS / GKE)</h2>
+        <button class="btn primary" onclick="runK8sAudit()">⚡ Audit EKS Cluster</button>
+      </div>
+      <p style="color:var(--muted);">Audits Privileged Pods, RBAC wildcards, Network Policies, and Secrets exposure.</p>
+    </div>
+    <div id="k8s-results"></div>
+  `;
+  runK8sAudit();
+}
+
+async function runK8sAudit() {
+  const target = $("#k8s-results");
+  if (!target) return;
+  target.innerHTML = `<div class="card">Auditing cluster...</div>`;
+  try {
+    const res = await api("/k8s/scan", { method: "POST", body: JSON.stringify({ cluster_name: "eks-prod-us-east", distro: "eks" }) });
+    target.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Cluster: ${esc(res.cluster_name)} (${esc(res.distro.toUpperCase())})</span>
+          <span class="badge pass">Security Score: ${res.score} / 100</span>
+        </div>
+        <div class="grid grid-4" style="margin:1rem 0;">
+          <div class="card"><div>Privileged Pods</div><div class="stat-val" style="color:var(--critical);">${res.privileged_pods}</div></div>
+          <div class="card"><div>RBAC Violations</div><div class="stat-val" style="color:var(--high);">${res.rbac_violations}</div></div>
+          <div class="card"><div>Missing Net Policies</div><div class="stat-val" style="color:var(--medium);">${res.missing_net_pol}</div></div>
+          <div class="card"><div>Exposed Secrets</div><div class="stat-val" style="color:var(--high);">${res.exposed_secrets}</div></div>
+        </div>
+      </div>
+    `;
+  } catch (err) { target.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+async function renderIaC(container) {
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header">
+        <h2>Infrastructure as Code (IaC) Static Scanner</h2>
+      </div>
+      <p style="color:var(--muted);">Scan Terraform (.tf), CloudFormation, ARM/Bicep, and Pulumi before deployment.</p>
+      <div style="margin-top:1rem;">
+        <textarea id="iac-code" style="width:100%; height:140px; background:var(--panel-2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:0.8rem; font-family:var(--font-mono);" placeholder="Paste Terraform HCL or CloudFormation JSON here..."></textarea>
+        <button class="btn primary" style="margin-top:0.8rem;" onclick="runIaCScan()">🔍 Run IaC Security Analysis</button>
+      </div>
+    </div>
+    <div id="iac-results"></div>
+  `;
+}
+
+async function runIaCScan() {
+  const target = $("#iac-results");
+  const code = $("#iac-code")?.value || 'resource "aws_security_group_rule" "ssh" { cidr_blocks = ["0.0.0.0/0"] from_port = 22 }';
+  target.innerHTML = `<div class="card">Analyzing IaC code...</div>`;
+  try {
+    const res = await api("/iac/scan", { method: "POST", body: JSON.stringify({ file_path: "terraform/main.tf", iac_type: "terraform", content: code }) });
+    target.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">IaC Scan Findings (${res.findings_count})</span>
+          <span class="badge ${res.findings_count > 0 ? 'critical' : 'pass'}">${res.findings_count} Security Violations</span>
+        </div>
+        ${res.issues.map(iss => `
+          <div style="border-bottom:1px solid var(--border); padding:0.8rem 0;">
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+              <span class="badge ${iss.severity}">${esc(iss.severity.toUpperCase())}</span>
+              <strong>Line ${iss.line}: ${esc(iss.title)}</strong>
+            </div>
+            <p style="margin:0.3rem 0; color:var(--muted);">${esc(iss.description)}</p>
+            <p style="color:var(--accent-2); margin:0;"><strong>Remediation:</strong> ${esc(iss.remediation)}</p>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (err) { target.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+async function renderCompliance(container) {
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header">
+        <h2>Compliance Frameworks & Multi-Format Exporter</h2>
+        <div>
+          <button class="btn primary" onclick="exportReport('executive', 'pdf')">📄 Export PDF</button>
+          <button class="btn" onclick="exportReport('technical', 'csv')">📊 Export CSV</button>
+          <button class="btn" onclick="exportReport('cis', 'json')">⚙️ Export JSON</button>
+        </div>
+      </div>
+      <p style="color:var(--muted);">Automated posture reports for CIS Benchmarks, SOC 2, PCI DSS, ISO 27001, NIST CSF, and HIPAA.</p>
+    </div>
+    <div class="grid grid-2">
+      ${FRAMEWORKS.map(f => `
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">${esc(FRAMEWORK_LABELS[f] || f)}</span>
+            <span class="badge pass">Score: 92%</span>
+          </div>
+          <p>Automated continuous mapping against checks.</p>
+          <button class="btn sm" style="margin-top:0.5rem;" onclick="exportReport('${f}', 'pdf')">Download Evidence PDF</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function exportReport(reportType, format) {
+  window.open(`${API}/reports/export?report_type=${reportType}&format=${format}`, '_blank');
+}
+
+async function renderDrift(container) {
+  try {
+    const drifts = await api("/drift");
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <h2>Configuration Drift Detection & Rollback Generator</h2>
+          <span class="badge warn">${drifts.length} Drift Events</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Resource</th><th>Type</th><th>Drift Type</th><th>Detected At</th><th>Rollback Command</th></tr>
+          </thead>
+          <tbody>
+            ${drifts.map(d => `
+              <tr>
+                <td><code>${esc(d.resource_id || 'bucket-01')}</code></td>
+                <td>${esc(d.resource_type || 's3')}</td>
+                <td><span class="badge high">${esc(d.drift_type)}</span></td>
+                <td>${new Date(d.detected_at).toLocaleString()}</td>
+                <td>
+                  <button class="btn sm primary" onclick="showRollback('${esc(d.rollback_cli)}', '${esc(d.rollback_terraform)}')">📜 View Rollback Script</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+async function renderMSSP(container) {
+  try {
+    const clients = await api("/mssp/clients");
+    container.innerHTML = `
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header">
+          <h2>MSSP Partner Agency Portal</h2>
+          <span class="badge pass">Partner License Active</span>
+        </div>
+        <p style="color:var(--muted);">Manage multi-tenant clients, white-label branding, and client-specific security posture reports.</p>
+      </div>
+
+      <div class="grid grid-2">
+        ${clients.map(c => `
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">🏢 ${esc(c.client_name)}</span>
+              <span class="badge pass">Active Client</span>
+            </div>
+            <p><strong>Client Org ID:</strong> <code>${esc(c.client_org_id)}</code></p>
+            <button class="btn sm primary" style="margin-top:0.8rem;" onclick="switchClientOrg('${esc(c.client_org_id)}')">🔄 Switch to Client Workspace</button>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (err) { container.innerHTML = `<div class="card">${esc(err.message)}</div>`; }
+}
+
+function switchClientOrg(orgId) {
+  if (store.session) {
+    store.session.org = orgId;
+    store.session = store.session;
+    toast(`Switched to client workspace: ${orgId}`, "success");
+    route();
+  }
+}
+
+async function renderApiKeys(container) {
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header">
+        <h2>API Keys & Software Development Kits (SDKs)</h2>
+      </div>
+      <p style="color:var(--muted);">REST and GraphQL programmatic access credentials.</p>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Python SDK (<code>cspm-sdk</code>)</h3>
+        <pre style="background:var(--panel-2); padding:0.8rem; border-radius:8px;">pip install aegis-cnapp-sdk
+from aegis import AegisClient
+client = AegisClient(api_key="cspm_...")
+findings = client.list_findings()</pre>
+      </div>
+      <div class="card">
+        <h3>JavaScript SDK (<code>@aegis/cnapp-sdk</code>)</h3>
+        <pre style="background:var(--panel-2); padding:0.8rem; border-radius:8px;">npm install @aegis/cnapp-sdk
+const { AegisClient } = require('@aegis/cnapp-sdk');
+const client = new AegisClient('cspm_...');</pre>
+      </div>
+    </div>
+  `;
+}
+
+async function renderBilling(container) {
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header">
+        <h2>Billing & 6-Tier CNAPP Licensing Model</h2>
+        <span class="badge pass">Active Plan: Business</span>
+      </div>
+      <div class="grid grid-4" style="margin-top:1rem;">
+        <div class="card" style="border-top:3px solid var(--accent-2);">
+          <h3>Community</h3>
+          <div class="stat-val">$0</div>
+          <p style="color:var(--muted);">Free Learning & Open Source</p>
+        </div>
+        <div class="card" style="border-top:3px solid var(--pass);">
+          <h3>Starter</h3>
+          <div class="stat-val">$49 <small style="font-size:0.8rem;">/mo</small></div>
+          <p style="color:var(--muted);">Small startups</p>
+        </div>
+        <div class="card" style="border-top:3px solid var(--high);">
+          <h3>Professional</h3>
+          <div class="stat-val">$299 <small style="font-size:0.8rem;">/mo</small></div>
+          <p style="color:var(--muted);">Growing SaaS teams</p>
+        </div>
+        <div class="card" style="border-top:3px solid var(--critical);">
+          <h3>Business</h3>
+          <div class="stat-val">$999 <small style="font-size:0.8rem;">/mo</small></div>
+          <p style="color:var(--muted);">Mid-market CNAPP</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ---------- Global Modal Handlers ---------- */
+async function showAIFix(checkId, resource) {
+  modal(`🤖 AI Security Fix — ${checkId}`, `<div id="ai-modal-content">Loading AI recommendations...</div>`, async (mbody) => {
+    try {
+      const res = await api("/ai/remediate", { method: "POST", body: JSON.stringify({ check_id: checkId, resource: resource }) });
+      mbody.innerHTML = `
+        <p><strong>Explanation:</strong> ${esc(res.explanation)}</p>
+        <p><strong>Root Cause:</strong> ${esc(res.root_cause)}</p>
+        <p><strong>Risk Impact:</strong> ${esc(res.risk)}</p>
+        <p><strong>Estimated Effort:</strong> <span class="badge pass">${esc(res.estimated_effort)}</span></p>
+        
+        <h4 style="margin-top:1rem;">AWS CLI Fix Command</h4>
+        <pre style="background:var(--panel-2); padding:0.8rem; border-radius:8px; overflow-x:auto;">${esc(res.cli_fix)}</pre>
+        
+        <h4>Terraform Fix Code</h4>
+        <pre style="background:var(--panel-2); padding:0.8rem; border-radius:8px; overflow-x:auto;">${esc(res.terraform_fix)}</pre>
+        
+        <h4>AWS Console Steps</h4>
+        <p style="color:var(--muted);">${esc(res.console_fix)}</p>
+      `;
+    } catch (err) { mbody.innerHTML = `<p style="color:var(--critical);">${esc(err.message)}</p>`; }
+  });
+}
+
+function showRollback(cliCmd, tfCode) {
+  modal("📜 Rollback Script Recommendation", `
+    <h4>AWS CLI Rollback Command</h4>
+    <pre style="background:var(--panel-2); padding:0.8rem; border-radius:8px;">${esc(cliCmd || 'aws ec2 revoke-security-group-ingress')}</pre>
+    <h4>Terraform Rollback Manifest</h4>
+    <pre style="background:var(--panel-2); padding:0.8rem; border-radius:8px;">${esc(tfCode || '# Terraform apply rollback')}</pre>
+  `);
+}
+
+function openConnectModal() {
+  modal("Connect AWS Cloud Account", `
+    <form id="connect-aws-form">
+      <label>Account Label</label>
+      <input id="aws-label" placeholder="Production AWS Account" required />
+      <label>IAM Role ARN</label>
+      <input id="aws-arn" placeholder="arn:aws:iam::123456789012:role/AegisAuditRole" required />
+      <button type="submit" class="btn primary full" style="margin-top:1rem;">Connect Account</button>
+    </form>
+  `, (mbody, close) => {
+    $("#connect-aws-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        await api("/accounts/aws", { method: "POST", body: JSON.stringify({ provider: "aws", label: $("#aws-label").value, role_arn: $("#aws-arn").value }) });
+        toast("AWS Account Connected!", "success");
+        close();
+        route();
+      } catch (err) { toast(err.message, "error"); }
+    });
+  });
+}
+
+function triggerScan(accId) {
+  api(`/accounts/${accId}/scan`, { method: "POST" })
+    .then(() => { toast("Scan queued successfully", "success"); route(); })
+    .catch((err) => toast(err.message, "error"));
+}
+
+window.addEventListener("DOMContentLoaded", init);

@@ -64,10 +64,15 @@ async def _entitlement_handler(request, exc):  # noqa: ANN001
         status_code=402,
         content={"detail": str(exc), "upgrade_to": getattr(exc, "upgrade_to", "pro")},
     )
+from cspm.api.graphql_router import router as graphql_router
+from cspm.api.mssp_router import router as mssp_router
+
 app.include_router(router)
 app.include_router(scim_router)
 app.include_router(key_router)
 app.include_router(billing_router)
+app.include_router(graphql_router)
+app.include_router(mssp_router)
 
 
 @app.get("/api/v1/cspm/health")

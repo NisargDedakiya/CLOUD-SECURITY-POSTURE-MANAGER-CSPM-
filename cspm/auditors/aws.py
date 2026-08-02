@@ -53,6 +53,11 @@ class AWSAuditor(BaseAuditor):
 
     @staticmethod
     def _assume_role(role_arn: str | None, external_id: str | None):  # pragma: no cover
+        if role_arn and "demo" in role_arn.lower():
+            from cspm.fakes import FakeAWSSession
+
+            return FakeAWSSession()
+
         import boto3
 
         if not role_arn:

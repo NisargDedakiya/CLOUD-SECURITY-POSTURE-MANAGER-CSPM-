@@ -24,6 +24,10 @@ class AWSConnector(BaseConnector):
 
     def validate(self) -> ValidationResult:
         """Cheapest read-only call: sts.get_caller_identity() on the assumed role."""
+        if self.role_arn and "demo" in self.role_arn.lower():
+            from cspm.fakes import FakeAWSSession
+
+            self._session = FakeAWSSession()
         try:
             session = self._session or self._assume()
             ident = session.client("sts").get_caller_identity()

@@ -1,0 +1,8 @@
+Contact: mailto:security@aegis-cnapp.com
+Contact: https://aegis-cnapp.com/security/disclosure
+Expires: 2027-12-31T23:59:59.000Z
+Encryption: https://aegis-cnapp.com/pgp-key.asc
+Preferred-Languages: en
+Canonical: https://aegis-cnapp.com/.well-known/security.txt
+Policy: https://aegis-cnapp.com/security/policy
+Hiring: https://aegis-cnapp.com/careers
